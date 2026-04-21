@@ -77,6 +77,7 @@
             display: none; 
             margin-top: 15px; 
             font-weight: bold;
+            line-height: 1.4;
         }
 
         /* --- Màn hình Chính --- */
@@ -264,7 +265,7 @@
         const WRITE_API_BASE = "https://dulieuchitieu-2ca4d-default-rtdb.firebaseio.com/trackingData/";
 
         let currentUserPhone = "";
-        let userDataCache = null; // Cache dữ liệu tải về sau bước 1
+        let userDataCache = null; 
         
         let currentWeekKey = "";
         let weekData = null; 
@@ -275,17 +276,6 @@
         const catsArr = ['ansang', 'antrua', 'antoi', 'dichuyen', 'tietkiem', 'khac'];
         const catsName = ['Ăn sáng', 'Ăn trưa', 'Ăn tối', 'Di chuyển', 'Tiết kiệm', 'Khác'];
 
-        // Hàm hỗ trợ tính toán WeekKey từ ngày
-        function getISOWeekNumber(date) {
-            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-            return Math.ceil((((d - new Date(Date.UTC(d.getUTCFullYear(),0,1))) / 86400000) + 1)/7);
-        }
-        function getWeekKey(date) {
-            let w = getISOWeekNumber(date);
-            return date.getFullYear() + '-' + String(w).padStart(2, '0');
-        }
-
         function showError(elementId, msg) {
             let errEl = document.getElementById(elementId);
             errEl.innerText = msg;
@@ -293,7 +283,6 @@
             document.getElementById('login-screen').style.opacity = '1';
             document.getElementById('verify-screen').style.opacity = '1';
         }
-
 
         // --- BƯỚC 1: XỬ LÝ ĐĂNG NHẬP (Chỉ lấy SĐT) ---
         async function handleLogin() {
@@ -304,22 +293,20 @@
             document.getElementById('login-screen').style.opacity = '0.5';
 
             try {
-                // Tải trước dữ liệu của user
                 let res = await fetch(`${READ_API_BASE}${phone}.json`);
                 let data = await res.json();
 
                 if (!data) {
-                    return showError("login-error", "Tài khoản này không tồn tại dữ liệu!");
+                    return showError("login-error", "Tài khoản này chưa tồn tại dữ liệu!");
                 }
 
-                // Lưu cache và chuyển sang bước 2
                 userDataCache = data;
                 currentUserPhone = phone;
 
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('verify-screen').style.display = 'flex';
                 document.getElementById('display-phone-verify').innerText = phone;
-                document.getElementById('login-code').value = ""; // Xóa mã cũ nếu có
+                document.getElementById('login-code').value = ""; 
 
             } catch (err) {
                 console.error(err);
@@ -338,32 +325,39 @@
 
             try {
                 if (!userDataCache.printHistory) {
-                    return showError("verify-error", "Tài khoản này chưa từng in kế hoạch (Không có lịch sử)!");
+                    return showError("verify-error", "Tài khoản này chưa từng in kế hoạch nào!");
                 }
 
-                // 1. Tìm mã đối soát trong lịch sử
+                // 1. Tìm mã đối soát
                 let historyItem = userDataCache.printHistory.find(h => h.asciiCode === code);
-
                 if (!historyItem) {
-                    return showError("verify-error", "Mã đối soát không tồn tại! Vui lòng kiểm tra lại.");
+                    return showError("verify-error", "Mã đối soát không tồn tại hoặc bạn nhập sai chữ hoa/chữ thường!");
                 }
 
-                // 2. Kiểm tra xem mã này có bị HỦY không
+                // 2. Kiểm tra hủy
                 if (historyItem.cancelData && historyItem.cancelData.isCancelled) {
                     let reason = historyItem.cancelData.reason || "Không có lý do";
-                    return showError("verify-error", `Bản in này ĐÃ BỊ HỦY!\nLý do: ${reason}\nVui lòng sử dụng Mã đối soát của bản in mới nhất.`);
+                    return showError("verify-error", `Bản in này ĐÃ BỊ HỦY!\nLý do: ${reason}\nVui lòng sử dụng bản in mới nhất.`);
                 }
 
-                // 3. Tính toán WeekKey từ ngày in
-                let dateObj = new Date(historyItem.dateStr);
-                currentWeekKey = getWeekKey(dateObj);
+                // 3. Tính toán WeekKey an toàn: Cắt trực tiếp chuỗi năm và ghép với số tuần đã lưu
+                // Không dùng new Date() để tránh lỗi NaN trên trình duyệt Safari/iOS cũ
+                let dateParts = historyItem.dateStr.split('-'); // VD: "2026-03-23"
+                if (dateParts.length < 3) {
+                    return showError("verify-error", "Lỗi định dạng ngày tháng trong cơ sở dữ liệu!");
+                }
+                
+                let year = dateParts[0];
+                let weekNum = historyItem.week; 
+                currentWeekKey = `${year}-${String(weekNum).padStart(2, '0')}`;
 
+                // 4. Lấy dữ liệu chi tiêu
                 if (!userDataCache.allWeeksData || !userDataCache.allWeeksData[currentWeekKey]) {
-                    return showError("verify-error", "Không tìm thấy dữ liệu chi tiêu của tuần này!");
+                    return showError("verify-error", `Không tìm thấy dữ liệu trên hệ thống cho tuần [${currentWeekKey}]!`);
                 }
 
-                // 4. Xác thực thành công
-                weekData = userDataCache.allWeeksData[currentWeekKey].expenses;
+                // Bảo vệ lỗi nếu Firebase tự xóa mảng expenses do rỗng (user chưa nhập gì)
+                weekData = userDataCache.allWeeksData[currentWeekKey].expenses || {};
 
                 // Load trạng thái checkbox từ DB Mới
                 await loadTrackingData();
@@ -379,7 +373,7 @@
 
             } catch (err) {
                 console.error(err);
-                showError("verify-error", "Có lỗi xảy ra trong quá trình xác thực!");
+                showError("verify-error", "Có lỗi xảy ra trong quá trình giải mã!");
             }
         }
 
@@ -398,6 +392,7 @@
             currentWeekKey = "";
             weekData = null;
             document.getElementById('login-code').value = "";
+            document.getElementById('verify-error').style.display = 'none';
             document.getElementById('main-app').style.display = 'none';
             document.getElementById('verify-screen').style.display = 'flex';
             document.getElementById('verify-screen').style.opacity = '1';
@@ -469,6 +464,7 @@
         }
 
         function formatVND(num) {
+            if (num === undefined || num === null) return '0 đ';
             return Number(num).toLocaleString('vi-VN') + ' đ';
         }
 
@@ -499,7 +495,9 @@
                                     </thead>`;
 
                 catsArr.forEach((catKey, cIdx) => {
-                    let items = (weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
+                    // Kiểm tra an toàn để tránh lỗi undefined nếu Firebase bị rỗng mảng
+                    let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
+                    
                     if (items.length > 0) {
                         html += `<tbody>
                                     <tr><td colspan="5" class="cat-row">- ${catsName[cIdx]}</td></tr>`;
@@ -511,6 +509,7 @@
                             let isDone = trackingData[dayKey] && trackingData[dayKey][catKey] && trackingData[dayKey][catKey][index];
                             let rowClass = isDone ? 'item-done' : '';
                             let checkedAttr = isDone ? 'checked' : '';
+                            let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
 
                             html += `<tr class="${rowClass}" id="row-${dayKey}-${catKey}-${index}">
                                         <td class="col-check">
@@ -518,8 +517,8 @@
                                             onchange="updateTaskStatus('${dayKey}', '${catKey}', ${index}, this.checked, this.closest('tr'))">
                                         </td>
                                         <td>${title}</td>
-                                        <td class="col-gia">${formatVND(item.gia.replace(/,/g, ''))}</td>
-                                        <td class="col-sl">${item.sl}</td>
+                                        <td class="col-gia">${formatVND(giaFormatted)}</td>
+                                        <td class="col-sl">${item.sl || 0}</td>
                                         <td class="col-tong">${formatVND(item.total)}</td>
                                     </tr>`;
                         });
@@ -532,7 +531,7 @@
             });
             
             if(container.innerHTML === "") {
-                container.innerHTML = `<p style="text-align:center; color:#7f8c8d; font-style:italic;">Không có nội dung chi tiêu nào được lên kế hoạch.</p>`;
+                container.innerHTML = `<p style="text-align:center; color:#7f8c8d; font-style:italic;">Không có nội dung chi tiêu nào được lên kế hoạch hoặc dữ liệu đang trống.</p>`;
             }
         }
     </script>
