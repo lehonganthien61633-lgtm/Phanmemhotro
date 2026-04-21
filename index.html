@@ -14,15 +14,16 @@
             color: #333;
         }
 
-        /* --- Màn hình Đăng nhập --- */
-        #login-screen {
+        /* --- Các Màn hình --- */
+        #login-screen, #verify-screen {
             height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
             background: linear-gradient(135deg, #2c3e50, #3498db);
         }
-        .login-box {
+        
+        .box-panel {
             background: white;
             padding: 40px;
             border-radius: 12px;
@@ -30,8 +31,8 @@
             text-align: center;
             width: 320px;
         }
-        .login-box h2 { margin-top: 0; color: #2c3e50; font-size: 22px;}
-        .login-box input {
+        .box-panel h2 { margin-top: 0; color: #2c3e50; font-size: 22px;}
+        .box-panel input {
             width: 100%;
             padding: 12px;
             margin: 10px 0 20px 0;
@@ -42,7 +43,7 @@
             font-family: monospace;
             text-align: center;
         }
-        .login-box label {
+        .box-panel label {
             display: block;
             text-align: left;
             font-size: 14px;
@@ -50,7 +51,7 @@
             color: #34495e;
             font-family: sans-serif;
         }
-        .login-box button {
+        .btn-primary {
             width: 100%;
             padding: 14px;
             background: #27ae60;
@@ -62,10 +63,25 @@
             cursor: pointer;
             margin-top: 10px;
         }
-        .login-box button:hover { background: #219653; }
+        .btn-primary:hover { background: #219653; }
+        
+        .btn-secondary {
+            background: #95a5a6;
+            margin-top: 10px;
+        }
+        .btn-secondary:hover { background: #7f8c8d; }
+
+        .error-msg {
+            color: #e74c3c; 
+            font-size: 14px; 
+            display: none; 
+            margin-top: 15px; 
+            font-weight: bold;
+        }
 
         /* --- Màn hình Chính --- */
-        #main-app { display: none; }
+        #main-app, #verify-screen { display: none; }
+        
         .navbar {
             background-color: #2c3e50;
             color: white;
@@ -175,18 +191,29 @@
 <body>
 
     <div id="login-screen">
-        <div class="login-box">
+        <div class="box-panel">
             <h2>HỆ THỐNG KIỂM TRA</h2>
-            <p style="color:#7f8c8d; font-size:14px; margin-bottom: 20px;">Xác thực bằng Phiếu kiểm toán</p>
+            <p style="color:#7f8c8d; font-size:14px; margin-bottom: 20px;">Bước 1: Đăng nhập tài khoản</p>
             
             <label>SỐ ĐIỆN THOẠI</label>
             <input type="tel" id="login-phone" placeholder="Nhập SĐT..." value="0839578432">
 
+            <button class="btn-primary" onclick="handleLogin()">TIẾP TỤC</button>
+            <p id="login-error" class="error-msg"></p>
+        </div>
+    </div>
+
+    <div id="verify-screen">
+        <div class="box-panel">
+            <h2>XÁC THỰC BẢN IN</h2>
+            <p style="color:#7f8c8d; font-size:14px; margin-bottom: 20px;">Tài khoản: <span id="display-phone-verify" style="font-weight:bold; color:#2c3e50;"></span></p>
+            
             <label>MÃ ĐỐI SOÁT</label>
             <input type="text" id="login-code" placeholder="VD: aB3dE5XYZ..." autocomplete="off">
 
-            <button onclick="handleLogin()">XÁC THỰC & TRUY CẬP</button>
-            <p id="login-error" style="color:#e74c3c; font-size:14px; display:none; margin-top:15px; font-weight:bold;"></p>
+            <button class="btn-primary" onclick="handleVerifyCode()">XÁC THỰC & TRUY CẬP</button>
+            <button class="btn-primary btn-secondary" onclick="backToLogin()">QUAY LẠI</button>
+            <p id="verify-error" class="error-msg"></p>
         </div>
     </div>
 
@@ -195,7 +222,8 @@
             <div style="font-size: 20px; font-weight: bold;">KIỂM TRA TIẾN ĐỘ CHI TIÊU <span id="status-msg"></span></div>
             <div>
                 <span id="user-info" style="margin-right: 15px; font-weight: bold;"></span>
-                <button onclick="logout()" style="padding: 5px 10px; cursor:pointer;">Thoát</button>
+                <button onclick="backToVerify()" style="padding: 5px 10px; cursor:pointer; margin-right: 5px;">Đổi Mã</button>
+                <button onclick="logout()" style="padding: 5px 10px; cursor:pointer; background: #e74c3c; border:none; color:white;">Thoát</button>
             </div>
         </div>
 
@@ -236,6 +264,8 @@
         const WRITE_API_BASE = "https://dulieuchitieu-2ca4d-default-rtdb.firebaseio.com/trackingData/";
 
         let currentUserPhone = "";
+        let userDataCache = null; // Cache dữ liệu tải về sau bước 1
+        
         let currentWeekKey = "";
         let weekData = null; 
         let trackingData = {}; 
@@ -256,64 +286,92 @@
             return date.getFullYear() + '-' + String(w).padStart(2, '0');
         }
 
-        // --- 1. XỬ LÝ ĐĂNG NHẬP VỚI MÃ ĐỐI SOÁT ---
-        function showError(msg) {
-            let errEl = document.getElementById('login-error');
+        function showError(elementId, msg) {
+            let errEl = document.getElementById(elementId);
             errEl.innerText = msg;
             errEl.style.display = 'block';
             document.getElementById('login-screen').style.opacity = '1';
+            document.getElementById('verify-screen').style.opacity = '1';
         }
 
+
+        // --- BƯỚC 1: XỬ LÝ ĐĂNG NHẬP (Chỉ lấy SĐT) ---
         async function handleLogin() {
             const phone = document.getElementById('login-phone').value.trim();
-            const code = document.getElementById('login-code').value.trim();
-            
-            if (!phone || !code) return showError("Vui lòng nhập đầy đủ SĐT và Mã đối soát!");
+            if (!phone) return showError("login-error", "Vui lòng nhập SĐT!");
             
             document.getElementById('login-error').style.display = 'none';
             document.getElementById('login-screen').style.opacity = '0.5';
 
             try {
-                // Đọc dữ liệu từ DB Gốc
+                // Tải trước dữ liệu của user
                 let res = await fetch(`${READ_API_BASE}${phone}.json`);
                 let data = await res.json();
 
-                if (!data || !data.printHistory) {
-                    return showError("Tài khoản này chưa có dữ liệu kiểm toán nào!");
+                if (!data) {
+                    return showError("login-error", "Tài khoản này không tồn tại dữ liệu!");
+                }
+
+                // Lưu cache và chuyển sang bước 2
+                userDataCache = data;
+                currentUserPhone = phone;
+
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('verify-screen').style.display = 'flex';
+                document.getElementById('display-phone-verify').innerText = phone;
+                document.getElementById('login-code').value = ""; // Xóa mã cũ nếu có
+
+            } catch (err) {
+                console.error(err);
+                showError("login-error", "Lỗi kết nối đến Server!");
+            }
+        }
+
+
+        // --- BƯỚC 2: XÁC THỰC MÃ ĐỐI SOÁT ---
+        async function handleVerifyCode() {
+            const code = document.getElementById('login-code').value.trim();
+            if (!code) return showError("verify-error", "Vui lòng nhập Mã đối soát!");
+
+            document.getElementById('verify-error').style.display = 'none';
+            document.getElementById('verify-screen').style.opacity = '0.5';
+
+            try {
+                if (!userDataCache.printHistory) {
+                    return showError("verify-error", "Tài khoản này chưa từng in kế hoạch (Không có lịch sử)!");
                 }
 
                 // 1. Tìm mã đối soát trong lịch sử
-                let historyItem = data.printHistory.find(h => h.asciiCode === code);
+                let historyItem = userDataCache.printHistory.find(h => h.asciiCode === code);
 
                 if (!historyItem) {
-                    return showError("Mã đối soát không tồn tại! Vui lòng kiểm tra lại.");
+                    return showError("verify-error", "Mã đối soát không tồn tại! Vui lòng kiểm tra lại.");
                 }
 
                 // 2. Kiểm tra xem mã này có bị HỦY không
                 if (historyItem.cancelData && historyItem.cancelData.isCancelled) {
                     let reason = historyItem.cancelData.reason || "Không có lý do";
-                    return showError(`Bản in này ĐÃ BỊ HỦY!\nLý do: ${reason}\nVui lòng sử dụng Mã đối soát của bản in mới nhất.`);
+                    return showError("verify-error", `Bản in này ĐÃ BỊ HỦY!\nLý do: ${reason}\nVui lòng sử dụng Mã đối soát của bản in mới nhất.`);
                 }
 
                 // 3. Tính toán WeekKey từ ngày in
                 let dateObj = new Date(historyItem.dateStr);
                 currentWeekKey = getWeekKey(dateObj);
 
-                if (!data.allWeeksData || !data.allWeeksData[currentWeekKey]) {
-                    return showError("Không tìm thấy dữ liệu chi tiêu của tuần này!");
+                if (!userDataCache.allWeeksData || !userDataCache.allWeeksData[currentWeekKey]) {
+                    return showError("verify-error", "Không tìm thấy dữ liệu chi tiêu của tuần này!");
                 }
 
-                // 4. Lấy dữ liệu thành công
-                weekData = data.allWeeksData[currentWeekKey].expenses;
-                currentUserPhone = phone;
+                // 4. Xác thực thành công
+                weekData = userDataCache.allWeeksData[currentWeekKey].expenses;
 
                 // Load trạng thái checkbox từ DB Mới
                 await loadTrackingData();
 
-                // Đổi UI
-                document.getElementById('login-screen').style.display = 'none';
+                // Đổi UI sang App
+                document.getElementById('verify-screen').style.display = 'none';
                 document.getElementById('main-app').style.display = 'block';
-                document.getElementById('user-info').innerText = `Tài khoản: ${phone}`;
+                document.getElementById('user-info').innerText = `SĐT: ${currentUserPhone}`;
                 document.getElementById('display-week').innerText = currentWeekKey;
                 document.getElementById('display-code').innerText = code;
 
@@ -321,21 +379,36 @@
 
             } catch (err) {
                 console.error(err);
-                showError("Lỗi kết nối đến Server!");
+                showError("verify-error", "Có lỗi xảy ra trong quá trình xác thực!");
             }
         }
 
-        function logout() {
+
+        // --- NÚT ĐIỀU HƯỚNG ---
+        function backToLogin() {
             currentUserPhone = "";
-            currentWeekKey = "";
-            weekData = null;
-            document.getElementById('login-code').value = '';
+            userDataCache = null;
+            document.getElementById('verify-error').style.display = 'none';
+            document.getElementById('verify-screen').style.display = 'none';
             document.getElementById('login-screen').style.display = 'flex';
-            document.getElementById('main-app').style.display = 'none';
             document.getElementById('login-screen').style.opacity = '1';
         }
 
-        // --- 2. XỬ LÝ ĐỌC/GHI TRẠNG THÁI (DB MỚI) ---
+        function backToVerify() {
+            currentWeekKey = "";
+            weekData = null;
+            document.getElementById('login-code').value = "";
+            document.getElementById('main-app').style.display = 'none';
+            document.getElementById('verify-screen').style.display = 'flex';
+            document.getElementById('verify-screen').style.opacity = '1';
+        }
+
+        function logout() {
+            backToLogin();
+            document.getElementById('main-app').style.display = 'none';
+        }
+
+        // --- 3. XỬ LÝ ĐỌC/GHI TRẠNG THÁI (DB MỚI) ---
         async function loadTrackingData() {
             setStatus("Đang đồng bộ...");
             try {
@@ -383,7 +456,7 @@
             el.style.color = color;
         }
 
-        // --- 3. XỬ LÝ GIAO DIỆN HIỂN THỊ ---
+        // --- 4. XỬ LÝ GIAO DIỆN HIỂN THỊ ---
         function toggleViewMode() {
             const isSingleDay = document.getElementById('view-toggle').checked;
             const selector = document.getElementById('day-selector');
