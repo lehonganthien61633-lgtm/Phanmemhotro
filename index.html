@@ -30,6 +30,7 @@
             box-shadow: 0 10px 25px rgba(0,0,0,0.2);
             text-align: center;
             width: 320px;
+            position: relative;
         }
         .box-panel h2 { margin-top: 0; color: #2c3e50; font-size: 22px;}
         .box-panel input {
@@ -78,6 +79,15 @@
             margin-top: 15px; 
             font-weight: bold;
             line-height: 1.4;
+        }
+
+        #loading-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.9);
+            display: flex; justify-content: center; align-items: center;
+            font-weight: bold; color: #2980b9; border-radius: 12px;
+            display: none;
         }
 
         /* --- Màn hình Chính --- */
@@ -201,6 +211,7 @@
 
             <button class="btn-primary" onclick="handleLogin()">TIẾP TỤC</button>
             <p id="login-error" class="error-msg"></p>
+            <div id="loading-overlay" style="display:none;">Đang kiểm tra dữ liệu...</div>
         </div>
     </div>
 
@@ -215,6 +226,7 @@
             <button class="btn-primary" onclick="handleVerifyCode()">XÁC THỰC & TRUY CẬP</button>
             <button class="btn-primary btn-secondary" onclick="backToLogin()">QUAY LẠI</button>
             <p id="verify-error" class="error-msg"></p>
+            <div id="verify-loading" style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.9); display:flex; justify-content:center; align-items:center; font-weight:bold; color:#2980b9; border-radius:12px; display:none;">Đang xác thực mã...</div>
         </div>
     </div>
 
@@ -276,37 +288,82 @@
         const catsArr = ['ansang', 'antrua', 'antoi', 'dichuyen', 'tietkiem', 'khac'];
         const catsName = ['Ăn sáng', 'Ăn trưa', 'Ăn tối', 'Di chuyển', 'Tiết kiệm', 'Khác'];
 
+        // Hàm lấy ngày chuẩn giờ Việt Nam để so sánh
+        function getGMT7Date() {
+            const d = new Date();
+            return new Date(d.getTime() + (d.getTimezoneOffset() * 60000) + (3600000 * 7));
+        }
+
+        // Hàm hỗ trợ tính toán WeekKey từ ngày
+        function getISOWeekNumber(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+            return Math.ceil((((d - new Date(Date.UTC(d.getUTCFullYear(),0,1))) / 86400000) + 1)/7);
+        }
+        function getWeekKey(date) {
+            let w = getISOWeekNumber(date);
+            return date.getFullYear() + '-' + String(w).padStart(2, '0');
+        }
+
         function showError(elementId, msg) {
             let errEl = document.getElementById(elementId);
             errEl.innerText = msg;
             errEl.style.display = 'block';
-            document.getElementById('login-screen').style.opacity = '1';
-            document.getElementById('verify-screen').style.opacity = '1';
+            document.getElementById('loading-overlay').style.display = 'none';
+            document.getElementById('verify-loading').style.display = 'none';
         }
 
+        // --- TỰ ĐỘNG ĐĂNG NHẬP KHI MỞ TRANG ---
+        document.addEventListener("DOMContentLoaded", async function() {
+            let savedPhone = localStorage.getItem('tracking_phone');
+            let savedCode = localStorage.getItem('tracking_code');
+
+            if (savedPhone) {
+                document.getElementById('login-phone').value = savedPhone;
+                // Chạy ngầm bước 1
+                await handleLogin(true); 
+
+                // Nếu có code, chạy tiếp bước 2
+                if (savedCode && userDataCache) {
+                    document.getElementById('login-code').value = savedCode;
+                    await handleVerifyCode(true);
+                }
+            }
+        });
+
+
         // --- BƯỚC 1: XỬ LÝ ĐĂNG NHẬP (Chỉ lấy SĐT) ---
-        async function handleLogin() {
+        async function handleLogin(isAuto = false) {
             const phone = document.getElementById('login-phone').value.trim();
             if (!phone) return showError("login-error", "Vui lòng nhập SĐT!");
             
             document.getElementById('login-error').style.display = 'none';
-            document.getElementById('login-screen').style.opacity = '0.5';
+            document.getElementById('loading-overlay').style.display = 'flex';
 
             try {
                 let res = await fetch(`${READ_API_BASE}${phone}.json`);
                 let data = await res.json();
 
                 if (!data) {
+                    localStorage.removeItem('tracking_phone');
                     return showError("login-error", "Tài khoản này chưa tồn tại dữ liệu!");
                 }
 
                 userDataCache = data;
                 currentUserPhone = phone;
+                
+                // Lưu SĐT vào máy
+                localStorage.setItem('tracking_phone', phone);
 
+                document.getElementById('loading-overlay').style.display = 'none';
                 document.getElementById('login-screen').style.display = 'none';
-                document.getElementById('verify-screen').style.display = 'flex';
-                document.getElementById('display-phone-verify').innerText = phone;
-                document.getElementById('login-code').value = ""; 
+                
+                // Nếu đang auto login thì chưa vội show verify screen, để hàm Auto tự xử lý
+                if (!isAuto) {
+                    document.getElementById('verify-screen').style.display = 'flex';
+                    document.getElementById('display-phone-verify').innerText = phone;
+                    document.getElementById('login-code').value = ""; 
+                }
 
             } catch (err) {
                 console.error(err);
@@ -315,54 +372,75 @@
         }
 
 
-        // --- BƯỚC 2: XÁC THỰC MÃ ĐỐI SOÁT ---
-        async function handleVerifyCode() {
+        // --- BƯỚC 2: XÁC THỰC MÃ ĐỐI SOÁT & KIỂM TRA HẠN ---
+        async function handleVerifyCode(isAuto = false) {
             const code = document.getElementById('login-code').value.trim();
             if (!code) return showError("verify-error", "Vui lòng nhập Mã đối soát!");
 
             document.getElementById('verify-error').style.display = 'none';
-            document.getElementById('verify-screen').style.opacity = '0.5';
+            document.getElementById('verify-loading').style.display = 'flex';
+            
+            if (isAuto) {
+                document.getElementById('verify-screen').style.display = 'flex';
+                document.getElementById('display-phone-verify').innerText = currentUserPhone;
+            }
 
             try {
                 if (!userDataCache.printHistory) {
+                    localStorage.removeItem('tracking_code');
                     return showError("verify-error", "Tài khoản này chưa từng in kế hoạch nào!");
                 }
 
                 // 1. Tìm mã đối soát
                 let historyItem = userDataCache.printHistory.find(h => h.asciiCode === code);
                 if (!historyItem) {
-                    return showError("verify-error", "Mã đối soát không tồn tại hoặc bạn nhập sai chữ hoa/chữ thường!");
+                    localStorage.removeItem('tracking_code');
+                    return showError("verify-error", "Mã đối soát không tồn tại hoặc sai chữ hoa/thường!");
                 }
 
                 // 2. Kiểm tra hủy
                 if (historyItem.cancelData && historyItem.cancelData.isCancelled) {
+                    localStorage.removeItem('tracking_code');
                     let reason = historyItem.cancelData.reason || "Không có lý do";
-                    return showError("verify-error", `Bản in này ĐÃ BỊ HỦY!\nLý do: ${reason}\nVui lòng sử dụng bản in mới nhất.`);
+                    return showError("verify-error", `Bản in này ĐÃ BỊ HỦY!\nLý do: ${reason}\nVui lòng nhập mã của bản in mới nhất.`);
                 }
 
-                // 3. Tính toán WeekKey an toàn: Cắt trực tiếp chuỗi năm và ghép với số tuần đã lưu
-                // Không dùng new Date() để tránh lỗi NaN trên trình duyệt Safari/iOS cũ
-                let dateParts = historyItem.dateStr.split('-'); // VD: "2026-03-23"
+                // 3. Tính toán và KIỂM TRA HẠN SỬ DỤNG
+                let dateParts = historyItem.dateStr.split('-'); 
                 if (dateParts.length < 3) {
-                    return showError("verify-error", "Lỗi định dạng ngày tháng trong cơ sở dữ liệu!");
+                    return showError("verify-error", "Lỗi định dạng ngày tháng trên hệ thống!");
                 }
                 
                 let year = dateParts[0];
                 let weekNum = historyItem.week; 
-                currentWeekKey = `${year}-${String(weekNum).padStart(2, '0')}`;
+                let ticketWeekKey = `${year}-${String(weekNum).padStart(2, '0')}`;
+                
+                // Lấy tuần hiện tại của thế giới thực để so sánh
+                let realCurrentWeekKey = getWeekKey(getGMT7Date());
+
+                // Nếu Tuần của phiếu KHÁC với Tuần hiện tại -> Hết hạn
+                if (ticketWeekKey !== realCurrentWeekKey) {
+                    localStorage.removeItem('tracking_code');
+                    return showError("verify-error", `Phiếu kiểm toán (Tuần ${weekNum}) đã hết hạn sử dụng cho tuần này.\nVui lòng nhập mã đối soát của bản in tuần mới!`);
+                }
+
+                currentWeekKey = ticketWeekKey;
 
                 // 4. Lấy dữ liệu chi tiêu
                 if (!userDataCache.allWeeksData || !userDataCache.allWeeksData[currentWeekKey]) {
                     return showError("verify-error", `Không tìm thấy dữ liệu trên hệ thống cho tuần [${currentWeekKey}]!`);
                 }
 
-                // Bảo vệ lỗi nếu Firebase tự xóa mảng expenses do rỗng (user chưa nhập gì)
                 weekData = userDataCache.allWeeksData[currentWeekKey].expenses || {};
+
+                // Lưu Code vào máy khi đã thành công mọi khâu
+                localStorage.setItem('tracking_code', code);
 
                 // Load trạng thái checkbox từ DB Mới
                 await loadTrackingData();
 
                 // Đổi UI sang App
+                document.getElementById('verify-loading').style.display = 'none';
                 document.getElementById('verify-screen').style.display = 'none';
                 document.getElementById('main-app').style.display = 'block';
                 document.getElementById('user-info').innerText = `SĐT: ${currentUserPhone}`;
@@ -382,20 +460,24 @@
         function backToLogin() {
             currentUserPhone = "";
             userDataCache = null;
+            localStorage.removeItem('tracking_phone');
+            localStorage.removeItem('tracking_code');
+
             document.getElementById('verify-error').style.display = 'none';
             document.getElementById('verify-screen').style.display = 'none';
             document.getElementById('login-screen').style.display = 'flex';
-            document.getElementById('login-screen').style.opacity = '1';
+            document.getElementById('login-phone').value = "";
         }
 
         function backToVerify() {
             currentWeekKey = "";
             weekData = null;
+            localStorage.removeItem('tracking_code'); // Xóa mã cũ
+
             document.getElementById('login-code').value = "";
             document.getElementById('verify-error').style.display = 'none';
             document.getElementById('main-app').style.display = 'none';
             document.getElementById('verify-screen').style.display = 'flex';
-            document.getElementById('verify-screen').style.opacity = '1';
         }
 
         function logout() {
@@ -403,7 +485,7 @@
             document.getElementById('main-app').style.display = 'none';
         }
 
-        // --- 3. XỬ LÝ ĐỌC/GHI TRẠNG THÁI (DB MỚI) ---
+        // --- XỬ LÝ ĐỌC/GHI TRẠNG THÁI (DB MỚI) ---
         async function loadTrackingData() {
             setStatus("Đang đồng bộ...");
             try {
@@ -451,7 +533,7 @@
             el.style.color = color;
         }
 
-        // --- 4. XỬ LÝ GIAO DIỆN HIỂN THỊ ---
+        // --- XỬ LÝ GIAO DIỆN HIỂN THỊ ---
         function toggleViewMode() {
             const isSingleDay = document.getElementById('view-toggle').checked;
             const selector = document.getElementById('day-selector');
@@ -495,7 +577,6 @@
                                     </thead>`;
 
                 catsArr.forEach((catKey, cIdx) => {
-                    // Kiểm tra an toàn để tránh lỗi undefined nếu Firebase bị rỗng mảng
                     let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
                     
                     if (items.length > 0) {
