@@ -28,21 +28,31 @@
             border-radius: 12px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.2);
             text-align: center;
-            width: 300px;
+            width: 320px;
         }
-        .login-box h2 { margin-top: 0; color: #2c3e50; }
+        .login-box h2 { margin-top: 0; color: #2c3e50; font-size: 22px;}
         .login-box input {
             width: 100%;
             padding: 12px;
-            margin: 15px 0;
+            margin: 10px 0 20px 0;
             border: 2px solid #ddd;
             border-radius: 6px;
             box-sizing: border-box;
             font-size: 16px;
+            font-family: monospace;
+            text-align: center;
+        }
+        .login-box label {
+            display: block;
+            text-align: left;
+            font-size: 14px;
+            font-weight: bold;
+            color: #34495e;
+            font-family: sans-serif;
         }
         .login-box button {
             width: 100%;
-            padding: 12px;
+            padding: 14px;
             background: #27ae60;
             color: white;
             border: none;
@@ -50,6 +60,7 @@
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
+            margin-top: 10px;
         }
         .login-box button:hover { background: #219653; }
 
@@ -110,7 +121,7 @@
             font-size: 16px;
             border-radius: 4px;
             border: 1px solid #ccc;
-            display: none; /* Ẩn mặc định */
+            display: none;
         }
 
         /* --- Tables --- */
@@ -166,10 +177,16 @@
     <div id="login-screen">
         <div class="login-box">
             <h2>HỆ THỐNG KIỂM TRA</h2>
-            <p style="color:#7f8c8d; font-size:14px;">Nhập SĐT để đồng bộ dữ liệu</p>
-            <input type="tel" id="login-phone" placeholder="Số điện thoại..." value="0839578432">
-            <button onclick="handleLogin()">TRUY CẬP</button>
-            <p id="login-error" style="color:#e74c3c; font-size:14px; display:none; margin-top:10px;">Không tìm thấy dữ liệu!</p>
+            <p style="color:#7f8c8d; font-size:14px; margin-bottom: 20px;">Xác thực bằng Phiếu kiểm toán</p>
+            
+            <label>SỐ ĐIỆN THOẠI</label>
+            <input type="tel" id="login-phone" placeholder="Nhập SĐT..." value="0839578432">
+
+            <label>MÃ ĐỐI SOÁT</label>
+            <input type="text" id="login-code" placeholder="VD: aB3dE5XYZ..." autocomplete="off">
+
+            <button onclick="handleLogin()">XÁC THỰC & TRUY CẬP</button>
+            <p id="login-error" style="color:#e74c3c; font-size:14px; display:none; margin-top:15px; font-weight:bold;"></p>
         </div>
     </div>
 
@@ -178,7 +195,7 @@
             <div style="font-size: 20px; font-weight: bold;">KIỂM TRA TIẾN ĐỘ CHI TIÊU <span id="status-msg"></span></div>
             <div>
                 <span id="user-info" style="margin-right: 15px; font-weight: bold;"></span>
-                <button onclick="logout()" style="padding: 5px 10px; cursor:pointer;">Đăng xuất</button>
+                <button onclick="logout()" style="padding: 5px 10px; cursor:pointer;">Thoát</button>
             </div>
         </div>
 
@@ -204,8 +221,9 @@
                 </select>
             </div>
 
-            <h3 style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px;">
-                DỮ LIỆU TUẦN: <span id="display-week" style="color:#e74c3c;">...</span>
+            <h3 style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; line-height: 1.5;">
+                DỮ LIỆU TUẦN: <span id="display-week" style="color:#e74c3c;">...</span><br>
+                <span style="font-size: 14px; color: #7f8c8d; font-family: monospace;">Mã đối soát: <span id="display-code"></span></span>
             </h3>
 
             <div id="data-container"></div>
@@ -217,21 +235,40 @@
         const READ_API_BASE = "https://kehoachthuchi-b923b-default-rtdb.asia-southeast1.firebasedatabase.app/usersData/";
         const WRITE_API_BASE = "https://dulieuchitieu-2ca4d-default-rtdb.firebaseio.com/trackingData/";
 
-        // Biến toàn cục
         let currentUserPhone = "";
         let currentWeekKey = "";
-        let weekData = null; // Chứa dữ liệu chi tiêu tuần
-        let trackingData = {}; // Chứa trạng thái checkbox
+        let weekData = null; 
+        let trackingData = {}; 
 
         const daysArr = ['thu-2', 'thu-3', 'thu-4', 'thu-5', 'thu-6', 'thu-7', 'chua-nhat'];
         const daysName = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chúa nhật'];
         const catsArr = ['ansang', 'antrua', 'antoi', 'dichuyen', 'tietkiem', 'khac'];
         const catsName = ['Ăn sáng', 'Ăn trưa', 'Ăn tối', 'Di chuyển', 'Tiết kiệm', 'Khác'];
 
-        // --- 1. XỬ LÝ ĐĂNG NHẬP ---
+        // Hàm hỗ trợ tính toán WeekKey từ ngày
+        function getISOWeekNumber(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+            return Math.ceil((((d - new Date(Date.UTC(d.getUTCFullYear(),0,1))) / 86400000) + 1)/7);
+        }
+        function getWeekKey(date) {
+            let w = getISOWeekNumber(date);
+            return date.getFullYear() + '-' + String(w).padStart(2, '0');
+        }
+
+        // --- 1. XỬ LÝ ĐĂNG NHẬP VỚI MÃ ĐỐI SOÁT ---
+        function showError(msg) {
+            let errEl = document.getElementById('login-error');
+            errEl.innerText = msg;
+            errEl.style.display = 'block';
+            document.getElementById('login-screen').style.opacity = '1';
+        }
+
         async function handleLogin() {
             const phone = document.getElementById('login-phone').value.trim();
-            if (!phone) return alert("Vui lòng nhập SĐT");
+            const code = document.getElementById('login-code').value.trim();
+            
+            if (!phone || !code) return showError("Vui lòng nhập đầy đủ SĐT và Mã đối soát!");
             
             document.getElementById('login-error').style.display = 'none';
             document.getElementById('login-screen').style.opacity = '0.5';
@@ -241,15 +278,32 @@
                 let res = await fetch(`${READ_API_BASE}${phone}.json`);
                 let data = await res.json();
 
-                if (!data || !data.allWeeksData) {
-                    document.getElementById('login-error').style.display = 'block';
-                    document.getElementById('login-screen').style.opacity = '1';
-                    return;
+                if (!data || !data.printHistory) {
+                    return showError("Tài khoản này chưa có dữ liệu kiểm toán nào!");
                 }
 
-                // Tìm tuần mới nhất
-                let weeks = Object.keys(data.allWeeksData).sort();
-                currentWeekKey = weeks[weeks.length - 1]; // Lấy tuần cuối cùng
+                // 1. Tìm mã đối soát trong lịch sử
+                let historyItem = data.printHistory.find(h => h.asciiCode === code);
+
+                if (!historyItem) {
+                    return showError("Mã đối soát không tồn tại! Vui lòng kiểm tra lại.");
+                }
+
+                // 2. Kiểm tra xem mã này có bị HỦY không
+                if (historyItem.cancelData && historyItem.cancelData.isCancelled) {
+                    let reason = historyItem.cancelData.reason || "Không có lý do";
+                    return showError(`Bản in này ĐÃ BỊ HỦY!\nLý do: ${reason}\nVui lòng sử dụng Mã đối soát của bản in mới nhất.`);
+                }
+
+                // 3. Tính toán WeekKey từ ngày in
+                let dateObj = new Date(historyItem.dateStr);
+                currentWeekKey = getWeekKey(dateObj);
+
+                if (!data.allWeeksData || !data.allWeeksData[currentWeekKey]) {
+                    return showError("Không tìm thấy dữ liệu chi tiêu của tuần này!");
+                }
+
+                // 4. Lấy dữ liệu thành công
                 weekData = data.allWeeksData[currentWeekKey].expenses;
                 currentUserPhone = phone;
 
@@ -261,19 +315,21 @@
                 document.getElementById('main-app').style.display = 'block';
                 document.getElementById('user-info').innerText = `Tài khoản: ${phone}`;
                 document.getElementById('display-week').innerText = currentWeekKey;
+                document.getElementById('display-code').innerText = code;
 
                 renderData();
 
             } catch (err) {
                 console.error(err);
-                alert("Lỗi kết nối đến Server!");
-                document.getElementById('login-screen').style.opacity = '1';
+                showError("Lỗi kết nối đến Server!");
             }
         }
 
         function logout() {
             currentUserPhone = "";
+            currentWeekKey = "";
             weekData = null;
+            document.getElementById('login-code').value = '';
             document.getElementById('login-screen').style.display = 'flex';
             document.getElementById('main-app').style.display = 'none';
             document.getElementById('login-screen').style.opacity = '1';
@@ -293,21 +349,17 @@
             }
         }
 
-        // Debounce timer để tránh gọi API liên tục khi click nhiều checkbox
         let saveTimer; 
         function updateTaskStatus(day, cat, index, isChecked, rowElement) {
-            // Đổi CSS dòng
             if (isChecked) rowElement.classList.add('item-done');
             else rowElement.classList.remove('item-done');
 
-            // Lưu vào object local
             if (!trackingData[day]) trackingData[day] = {};
             if (!trackingData[day][cat]) trackingData[day][cat] = {};
             trackingData[day][cat][index] = isChecked;
 
             setStatus("Đang lưu...", "orange");
 
-            // Cập nhật lên DB mới (Chỉ update PATCH điểm thay đổi nhỏ)
             clearTimeout(saveTimer);
             saveTimer = setTimeout(async () => {
                 try {
@@ -373,21 +425,16 @@
                                         </tr>
                                     </thead>`;
 
-                // Render từng Danh mục
                 catsArr.forEach((catKey, cIdx) => {
                     let items = (weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
                     if (items.length > 0) {
-                        // Dòng tiêu đề Category
                         html += `<tbody>
                                     <tr><td colspan="5" class="cat-row">- ${catsName[cIdx]}</td></tr>`;
                         
-                        // Các item bên trong
                         items.forEach((item, index) => {
-                            // Lọc chữ Nộp quỹ như app gốc
                             let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
                             let title = `${cleanNd} ${item.dt ? ' | ' + item.dt : ''}`;
                             
-                            // Kiểm tra trạng thái đã tick chưa
                             let isDone = trackingData[dayKey] && trackingData[dayKey][catKey] && trackingData[dayKey][catKey][index];
                             let rowClass = isDone ? 'item-done' : '';
                             let checkedAttr = isDone ? 'checked' : '';
@@ -411,7 +458,6 @@
                 container.innerHTML += html;
             });
             
-            // Nếu không có dữ liệu nào
             if(container.innerHTML === "") {
                 container.innerHTML = `<p style="text-align:center; color:#7f8c8d; font-style:italic;">Không có nội dung chi tiêu nào được lên kế hoạch.</p>`;
             }
