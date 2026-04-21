@@ -224,7 +224,7 @@
             <input type="text" id="login-code" placeholder="VD: aB3dE5XYZ..." autocomplete="off">
 
             <button class="btn-primary" onclick="handleVerifyCode()">XÁC THỰC & TRUY CẬP</button>
-            <button class="btn-primary btn-secondary" onclick="backToLogin()">QUAY LẠI</button>
+            <button class="btn-primary btn-secondary" onclick="backToLogin()">QUAY LẠI TÀI KHOẢN</button>
             <p id="verify-error" class="error-msg"></p>
             <div id="verify-loading" style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.9); display:flex; justify-content:center; align-items:center; font-weight:bold; color:#2980b9; border-radius:12px; display:none;">Đang xác thực mã...</div>
         </div>
@@ -316,23 +316,16 @@
         // --- TỰ ĐỘNG ĐĂNG NHẬP KHI MỞ TRANG ---
         document.addEventListener("DOMContentLoaded", async function() {
             let savedPhone = localStorage.getItem('tracking_phone');
-            let savedCode = localStorage.getItem('tracking_code');
 
             if (savedPhone) {
                 document.getElementById('login-phone').value = savedPhone;
-                // Chạy ngầm bước 1
+                // Nếu có SĐT đã lưu, chạy trực tiếp hàm kiểm tra đăng nhập
                 await handleLogin(true); 
-
-                // Nếu có code, chạy tiếp bước 2
-                if (savedCode && userDataCache) {
-                    document.getElementById('login-code').value = savedCode;
-                    await handleVerifyCode(true);
-                }
             }
         });
 
 
-        // --- BƯỚC 1: XỬ LÝ ĐĂNG NHẬP (Chỉ lấy SĐT) ---
+        // --- BƯỚC 1: XỬ LÝ ĐĂNG NHẬP (Lấy SĐT & Tự Động Quét Mã) ---
         async function handleLogin(isAuto = false) {
             const phone = document.getElementById('login-phone').value.trim();
             if (!phone) return showError("login-error", "Vui lòng nhập SĐT!");
@@ -346,20 +339,50 @@
 
                 if (!data) {
                     localStorage.removeItem('tracking_phone');
-                    return showError("login-error", "Tài khoản này chưa tồn tại dữ liệu!");
+                    return showError("login-error", "Tài khoản này chưa tồn tại dữ liệu trên hệ thống!");
                 }
 
                 userDataCache = data;
                 currentUserPhone = phone;
                 
-                // Lưu SĐT vào máy
+                // Lưu SĐT vào máy để lần sau tự vào
                 localStorage.setItem('tracking_phone', phone);
+
+                // --- TỰ ĐỘNG TÌM MÃ ĐỐI SOÁT HỢP LỆ TRONG DATABASE ---
+                let autoValidCode = null;
+                let realCurrentWeekKey = getWeekKey(getGMT7Date());
+
+                if (data.printHistory && data.printHistory.length > 0) {
+                    // Duyệt ngược từ cuối (bản in mới nhất) lên đầu
+                    for (let i = data.printHistory.length - 1; i >= 0; i--) {
+                        let h = data.printHistory[i];
+                        
+                        // Nếu bản in này ĐÃ BỊ HỦY -> Bỏ qua
+                        if (h.cancelData && h.cancelData.isCancelled) continue;
+
+                        // Kiểm tra xem phiếu có đúng tuần hiện tại không
+                        let dateParts = h.dateStr.split('-');
+                        if (dateParts.length >= 3) {
+                            let ticketWeekKey = `${dateParts[0]}-${String(h.week).padStart(2, '0')}`;
+                            if (ticketWeekKey === realCurrentWeekKey) {
+                                // Nếu chưa bị hủy VÀ thuộc đúng tuần này -> BẮT ĐƯỢC MÃ!
+                                autoValidCode = h.asciiCode;
+                                break; 
+                            }
+                        }
+                    }
+                }
 
                 document.getElementById('loading-overlay').style.display = 'none';
                 document.getElementById('login-screen').style.display = 'none';
                 
-                // Nếu đang auto login thì chưa vội show verify screen, để hàm Auto tự xử lý
-                if (!isAuto) {
+                // NẾU TÌM THẤY MÃ CÒN SỬ DỤNG ĐƯỢC TRÊN SERVER
+                if (autoValidCode) {
+                    // Tự động điền mã và đẩy sang màn hình App luôn
+                    document.getElementById('login-code').value = autoValidCode;
+                    await handleVerifyCode(true);
+                } else {
+                    // NẾU KHÔNG CÓ MÃ HOẶC TẤT CẢ CÁC MÃ ĐỀU HẾT HẠN / BỊ HỦY
                     document.getElementById('verify-screen').style.display = 'flex';
                     document.getElementById('display-phone-verify').innerText = phone;
                     document.getElementById('login-code').value = ""; 
@@ -372,7 +395,7 @@
         }
 
 
-        // --- BƯỚC 2: XÁC THỰC MÃ ĐỐI SOÁT & KIỂM TRA HẠN ---
+        // --- BƯỚC 2: XÁC THỰC MÃ ĐỐI SOÁT MANUALLY & KIỂM TRA HẠN ---
         async function handleVerifyCode(isAuto = false) {
             const code = document.getElementById('login-code').value.trim();
             if (!code) return showError("verify-error", "Vui lòng nhập Mã đối soát!");
@@ -380,6 +403,7 @@
             document.getElementById('verify-error').style.display = 'none';
             document.getElementById('verify-loading').style.display = 'flex';
             
+            // Nếu gọi từ AutoLogin, chuẩn bị sẵn giao diện Verify nhỡ gặp lỗi
             if (isAuto) {
                 document.getElementById('verify-screen').style.display = 'flex';
                 document.getElementById('display-phone-verify').innerText = currentUserPhone;
@@ -387,25 +411,22 @@
 
             try {
                 if (!userDataCache.printHistory) {
-                    localStorage.removeItem('tracking_code');
                     return showError("verify-error", "Tài khoản này chưa từng in kế hoạch nào!");
                 }
 
-                // 1. Tìm mã đối soát
+                // 1. Tìm mã đối soát người dùng nhập
                 let historyItem = userDataCache.printHistory.find(h => h.asciiCode === code);
                 if (!historyItem) {
-                    localStorage.removeItem('tracking_code');
                     return showError("verify-error", "Mã đối soát không tồn tại hoặc sai chữ hoa/thường!");
                 }
 
                 // 2. Kiểm tra hủy
                 if (historyItem.cancelData && historyItem.cancelData.isCancelled) {
-                    localStorage.removeItem('tracking_code');
                     let reason = historyItem.cancelData.reason || "Không có lý do";
                     return showError("verify-error", `Bản in này ĐÃ BỊ HỦY!\nLý do: ${reason}\nVui lòng nhập mã của bản in mới nhất.`);
                 }
 
-                // 3. Tính toán và KIỂM TRA HẠN SỬ DỤNG
+                // 3. Tính toán và KIỂM TRA HẠN SỬ DỤNG CỦA PHIẾU
                 let dateParts = historyItem.dateStr.split('-'); 
                 if (dateParts.length < 3) {
                     return showError("verify-error", "Lỗi định dạng ngày tháng trên hệ thống!");
@@ -415,12 +436,11 @@
                 let weekNum = historyItem.week; 
                 let ticketWeekKey = `${year}-${String(weekNum).padStart(2, '0')}`;
                 
-                // Lấy tuần hiện tại của thế giới thực để so sánh
+                // Lấy tuần hiện hành của thế giới thực để so sánh
                 let realCurrentWeekKey = getWeekKey(getGMT7Date());
 
                 // Nếu Tuần của phiếu KHÁC với Tuần hiện tại -> Hết hạn
                 if (ticketWeekKey !== realCurrentWeekKey) {
-                    localStorage.removeItem('tracking_code');
                     return showError("verify-error", `Phiếu kiểm toán (Tuần ${weekNum}) đã hết hạn sử dụng cho tuần này.\nVui lòng nhập mã đối soát của bản in tuần mới!`);
                 }
 
@@ -432,9 +452,6 @@
                 }
 
                 weekData = userDataCache.allWeeksData[currentWeekKey].expenses || {};
-
-                // Lưu Code vào máy khi đã thành công mọi khâu
-                localStorage.setItem('tracking_code', code);
 
                 // Load trạng thái checkbox từ DB Mới
                 await loadTrackingData();
@@ -461,7 +478,6 @@
             currentUserPhone = "";
             userDataCache = null;
             localStorage.removeItem('tracking_phone');
-            localStorage.removeItem('tracking_code');
 
             document.getElementById('verify-error').style.display = 'none';
             document.getElementById('verify-screen').style.display = 'none';
@@ -472,7 +488,6 @@
         function backToVerify() {
             currentWeekKey = "";
             weekData = null;
-            localStorage.removeItem('tracking_code'); // Xóa mã cũ
 
             document.getElementById('login-code').value = "";
             document.getElementById('verify-error').style.display = 'none';
