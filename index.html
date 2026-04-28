@@ -308,15 +308,7 @@
                 </div>
             </div>
         </div>
-        ```
-
-### BƯỚC 3: Cập nhật JavaScript (Logic xử lý mới)
-Bạn tìm trong phần `<script>`, bôi đen từ dòng `let saveTimer;` cho đến hết hàm `renderData()`, sau đó **xóa và thay thế bằng toàn bộ đoạn code dưới đây**.
-
-```javascript
-        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT ---
-
-        // Hàm tính ngày hiện tại để chỉ show dữ liệu hôm nay
+      // Hàm tính ngày hiện tại để chỉ show dữ liệu hôm nay
         function getCurrentDayKey() {
             let dayNum = getGMT7Date().getDay(); // 0 là Chủ nhật
             if(dayNum === 0) return 'chua-nhat';
@@ -401,6 +393,103 @@ Bạn tìm trong phần `<script>`, bôi đen từ dòng `let saveTimer;` cho đ
         }
 
         // Render lại dữ liệu
+        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT ---
+
+        // Hàm tính ngày hiện tại để chỉ show dữ liệu hôm nay
+        function getCurrentDayKey() {
+            let dayNum = getGMT7Date().getDay(); // 0 là Chủ nhật
+            if(dayNum === 0) return 'chua-nhat';
+            return `thu-${dayNum + 1}`;
+        }
+
+        // Ghi đè hàm cũ để không bị lỗi nếu HTML vẫn gọi
+        function toggleViewMode() { renderData(); }
+
+        let saveTimer; 
+        let currentAction = null;
+
+        // Xử lý khi nhấn nút tick
+        function openConfirmModal(day, cat, index, title, price, sl, checkboxEl) {
+            // Ngăn checkbox hiện dấu tick ngay lập tức
+            checkboxEl.checked = false; 
+            
+            let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
+            
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-price').value = numericPrice;
+            
+            currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
+            document.getElementById('confirm-modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('confirm-modal').style.display = 'none';
+            currentAction = null;
+        }
+
+        function confirmCheck() {
+            if(!currentAction) return;
+            let {day, cat, index, sl} = currentAction;
+            let actualPrice = document.getElementById('modal-price').value;
+
+            if (!trackingData[day]) trackingData[day] = {};
+            if (!trackingData[day][cat]) trackingData[day][cat] = {};
+
+            // Dùng Object để lưu số lần thay vì Boolean
+            let currentData = trackingData[day][cat][index];
+            if (typeof currentData === 'boolean') {
+                currentData = { count: currentData ? sl : 0, done: currentData, history: [] };
+            } else if (!currentData) {
+                currentData = { count: 0, done: false, history: [] };
+            }
+
+            // Tăng số lần chi và lưu số tiền
+            currentData.count += 1;
+            currentData.history.push(actualPrice);
+
+            // Kiểm tra nếu đã đủ số lượng -> hoàn thành
+            if (currentData.count >= sl) {
+                currentData.done = true;
+            }
+
+            trackingData[day][cat][index] = currentData;
+            saveStatusToDB(day, cat, index, currentData);
+
+            closeModal();
+            renderData(); // Render lại để mục đã xong biến mất
+        }
+
+        function saveStatusToDB(day, cat, index, dataObj) {
+            setStatus("Đang lưu...", "orange");
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(async () => {
+                try {
+                    let path = `${day}/${cat}/${index}`;
+                    await fetch(`${WRITE_API_BASE}${currentUserPhone}/${currentWeekKey}.json`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ [path]: dataObj })
+                    });
+                    setStatus("Đã lưu", "#2ecc71");
+                    setTimeout(() => setStatus(""), 2000);
+                } catch (e) {
+                    setStatus("Lỗi lưu DB", "red");
+                }
+            }, 1000);
+        }
+
+        function setStatus(text, color = "white") {
+            let el = document.getElementById('status-msg');
+            el.innerText = text ? `(${text})` : "";
+            el.style.color = color;
+        }
+
+        function formatVND(num) {
+            if (num === undefined || num === null) return '0 đ';
+            return Number(num).toLocaleString('vi-VN') + ' đ';
+        }
+
+        // Render lại dữ liệu
         function renderData() {
             const container = document.getElementById('data-container');
             container.innerHTML = "";
@@ -445,7 +534,7 @@ Bạn tìm trong phần `<script>`, bôi đen từ dòng `let saveTimer;` cho đ
                             count = tData.count || 0;
                         }
 
-                        // QUAN TRỌNG: Ẩn đi nếu đã hoàn thành đủ số lượng
+                        // Ẩn đi nếu đã hoàn thành đủ số lượng
                         if (isDone) return; 
 
                         hasVisibleItems = true;
@@ -456,7 +545,7 @@ Bạn tìm trong phần `<script>`, bôi đen từ dòng `let saveTimer;` cho đ
                         let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
                         let remainingSl = totalSl - count;
 
-                        // Xử lý chuỗi để tránh lỗi khi truyền vào hàm
+                        // Xử lý chuỗi để tránh lỗi HTML
                         let safeTitle = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
                         catHtml += `<tr id="row-${currentDayKey}-${catKey}-${index}">
@@ -488,8 +577,7 @@ Bạn tìm trong phần `<script>`, bôi đen từ dòng `let saveTimer;` cho đ
             }
         }
         // --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT ---
-    </div>
-
+        
     <script>
         // CẤU HÌNH API
         const READ_API_BASE = "https://kehoachthuchi-b923b-default-rtdb.asia-southeast1.firebasedatabase.app/usersData/";
