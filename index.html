@@ -278,8 +278,189 @@
                 <button id="tab-pending" class="tab-btn active" onclick="switchView('pending')">CẦN CHI TIÊU</button>
                 <button id="tab-history" class="tab-btn" onclick="switchView('history')">LỊCH SỬ ĐÃ TICK</button>
             </div>
-        let currentViewMode = 'pending'; // 'pending' hoặc 'history'
+            
+            <h3 style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; line-height: 1.5;">
+                DỮ LIỆU TUẦN: <span id="display-week" style="color:#e74c3c;">...</span><br>
+                <span style="font-size: 14px; color: #7f8c8d; font-family: monospace;">Mã đối soát: <span id="display-code"></span></span>
+            </h3>
 
+            <div id="data-container"></div>
+        </div>
+
+        <div id="confirm-modal">
+            <div class="modal-content">
+                <h3>XÁC NHẬN CHI TIÊU</h3>
+                <p id="modal-title" style="font-weight: bold; color: #e67e22; font-size: 18px; margin-bottom: 20px; word-wrap: break-word;"></p>
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Số tiền thực chi (VNĐ):</label>
+                <input type="number" id="modal-price" placeholder="Nhập số tiền chi...">
+                <div class="modal-btns">
+                    <button class="btn-cancel" onclick="closeModal()">Hủy</button>
+                    <button class="btn-confirm" onclick="confirmCheck()">Hoàn Thành</button>
+                </div>
+            </div>
+        </div>
+</div> <script>
+        // CẤU HÌNH API
+        const READ_API_BASE = "https://kehoachthuchi-b923b-default-rtdb.asia-southeast1.firebasedatabase.app/usersData/";
+        const WRITE_API_BASE = "https://dulieuchitieu-2ca4d-default-rtdb.firebaseio.com/trackingData/";
+
+        let currentUserPhone = "";
+        let userDataCache = null; 
+        let currentWeekKey = "";
+        let weekData = null; 
+        let trackingData = {}; 
+
+        const daysArr = ['thu-2', 'thu-3', 'thu-4', 'thu-5', 'thu-6', 'thu-7', 'chua-nhat'];
+        const daysName = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chúa nhật'];
+        const catsArr = ['ansang', 'antrua', 'antoi', 'dichuyen', 'tietkiem', 'khac'];
+        const catsName = ['Ăn sáng', 'Ăn trưa', 'Ăn tối', 'Di chuyển', 'Tiết kiệm', 'Khác'];
+
+        // Hàm ngày giờ
+        function getGMT7Date() {
+            const d = new Date();
+            return new Date(d.getTime() + (d.getTimezoneOffset() * 60000) + (3600000 * 7));
+        }
+        function getISOWeekNumber(date) {
+            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+            return Math.ceil((((d - new Date(Date.UTC(d.getUTCFullYear(),0,1))) / 86400000) + 1)/7);
+        }
+        function getWeekKey(date) {
+            let w = getISOWeekNumber(date);
+            return date.getFullYear() + '-' + String(w).padStart(2, '0');
+        }
+        function showError(elementId, msg) {
+            let errEl = document.getElementById(elementId);
+            errEl.innerText = msg; errEl.style.display = 'block';
+            document.getElementById('loading-overlay').style.display = 'none';
+            document.getElementById('verify-loading').style.display = 'none';
+        }
+
+        // Tự động Đăng nhập
+        document.addEventListener("DOMContentLoaded", async function() {
+            let savedPhone = localStorage.getItem('tracking_phone');
+            if (savedPhone) {
+                document.getElementById('login-phone').value = savedPhone;
+                await handleLogin(true); 
+            }
+        });
+
+        // Đăng nhập
+        async function handleLogin(isAuto = false) {
+            const phone = document.getElementById('login-phone').value.trim();
+            if (!phone) return showError("login-error", "Vui lòng nhập SĐT!");
+            
+            document.getElementById('login-error').style.display = 'none';
+            document.getElementById('loading-overlay').style.display = 'flex';
+
+            try {
+                let res = await fetch(`${READ_API_BASE}${phone}.json`);
+                let data = await res.json();
+                if (!data) {
+                    localStorage.removeItem('tracking_phone');
+                    return showError("login-error", "Tài khoản này chưa tồn tại dữ liệu!");
+                }
+
+                userDataCache = data; currentUserPhone = phone;
+                localStorage.setItem('tracking_phone', phone);
+
+                let autoValidCode = null;
+                let realCurrentWeekKey = getWeekKey(getGMT7Date());
+
+                if (data.printHistory && data.printHistory.length > 0) {
+                    for (let i = data.printHistory.length - 1; i >= 0; i--) {
+                        let h = data.printHistory[i];
+                        if (h.cancelData && h.cancelData.isCancelled) continue;
+                        let dateParts = h.dateStr.split('-');
+                        if (dateParts.length >= 3) {
+                            let ticketWeekKey = `${dateParts[0]}-${String(h.week).padStart(2, '0')}`;
+                            if (ticketWeekKey === realCurrentWeekKey) {
+                                autoValidCode = h.asciiCode; break; 
+                            }
+                        }
+                    }
+                }
+
+                document.getElementById('loading-overlay').style.display = 'none';
+                document.getElementById('login-screen').style.display = 'none';
+                
+                if (autoValidCode) {
+                    document.getElementById('login-code').value = autoValidCode;
+                    await handleVerifyCode(true);
+                } else {
+                    document.getElementById('verify-screen').style.display = 'flex';
+                    document.getElementById('display-phone-verify').innerText = phone;
+                    document.getElementById('login-code').value = ""; 
+                }
+            } catch (err) { showError("login-error", "Lỗi kết nối đến Server!"); }
+        }
+
+        // Xác thực
+        async function handleVerifyCode(isAuto = false) {
+            const code = document.getElementById('login-code').value.trim();
+            if (!code) return showError("verify-error", "Vui lòng nhập Mã đối soát!");
+
+            document.getElementById('verify-error').style.display = 'none';
+            document.getElementById('verify-loading').style.display = 'flex';
+            
+            if (isAuto) {
+                document.getElementById('verify-screen').style.display = 'flex';
+                document.getElementById('display-phone-verify').innerText = currentUserPhone;
+            }
+
+            try {
+                if (!userDataCache.printHistory) return showError("verify-error", "Chưa từng in kế hoạch nào!");
+                let historyItem = userDataCache.printHistory.find(h => h.asciiCode === code);
+                if (!historyItem) return showError("verify-error", "Mã đối soát sai!");
+                if (historyItem.cancelData && historyItem.cancelData.isCancelled) return showError("verify-error", `Bản in ĐÃ HỦY!`);
+
+                let dateParts = historyItem.dateStr.split('-'); 
+                let ticketWeekKey = `${dateParts[0]}-${String(historyItem.week).padStart(2, '0')}`;
+                if (ticketWeekKey !== getWeekKey(getGMT7Date())) {
+                    return showError("verify-error", `Phiếu đã hết hạn tuần này!`);
+                }
+
+                currentWeekKey = ticketWeekKey;
+                weekData = userDataCache.allWeeksData[currentWeekKey].expenses || {};
+                await loadTrackingData();
+
+                document.getElementById('verify-loading').style.display = 'none';
+                document.getElementById('verify-screen').style.display = 'none';
+                document.getElementById('main-app').style.display = 'block';
+                document.getElementById('user-info').innerText = `SĐT: ${currentUserPhone}`;
+                document.getElementById('display-week').innerText = currentWeekKey;
+                document.getElementById('display-code').innerText = code;
+                renderData();
+            } catch (err) { showError("verify-error", "Lỗi giải mã!"); }
+        }
+
+        function backToLogin() {
+            currentUserPhone = ""; userDataCache = null; localStorage.removeItem('tracking_phone');
+            document.getElementById('verify-error').style.display = 'none';
+            document.getElementById('verify-screen').style.display = 'none';
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('login-phone').value = "";
+        }
+        function backToVerify() {
+            currentWeekKey = ""; weekData = null;
+            document.getElementById('login-code').value = "";
+            document.getElementById('verify-error').style.display = 'none';
+            document.getElementById('main-app').style.display = 'none';
+            document.getElementById('verify-screen').style.display = 'flex';
+        }
+        function logout() { backToLogin(); document.getElementById('main-app').style.display = 'none'; }
+
+        async function loadTrackingData() {
+            setStatus("Đang đồng bộ...");
+            try {
+                let res = await fetch(`${WRITE_API_BASE}${currentUserPhone}/${currentWeekKey}.json`);
+                trackingData = await res.json() || {};
+                setStatus("");
+            } catch (err) { setStatus("Lỗi đồng bộ", "red"); }
+        }
+
+        // Logic UI (Tab & Modal)
+        let currentViewMode = 'pending'; 
         function switchView(mode) {
             currentViewMode = mode;
             document.getElementById('tab-pending').classList.toggle('active', mode === 'pending');
@@ -287,32 +468,23 @@
             renderData();
         }
 
-        // Hàm tính ngày hiện tại để chỉ show dữ liệu hôm nay
         function getCurrentDayKey() {
-            let dayNum = getGMT7Date().getDay(); // 0 là Chủ nhật
-            if(dayNum === 0) return 'chua-nhat';
-            return `thu-${dayNum + 1}`;
+            let dayNum = getGMT7Date().getDay();
+            return dayNum === 0 ? 'chua-nhat' : `thu-${dayNum + 1}`;
         }
 
-        let saveTimer; 
-        let currentAction = null;
+        let saveTimer; let currentAction = null;
 
-        // Xử lý khi nhấn nút tick
         function openConfirmModal(day, cat, index, title, price, sl, checkboxEl) {
-            checkboxEl.checked = false; // Ngăn tick liền
+            checkboxEl.checked = false; 
             let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
-            
             document.getElementById('modal-title').innerText = title;
             document.getElementById('modal-price').value = numericPrice;
-            
             currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
             document.getElementById('confirm-modal').style.display = 'flex';
         }
 
-        function closeModal() {
-            document.getElementById('confirm-modal').style.display = 'none';
-            currentAction = null;
-        }
+        function closeModal() { document.getElementById('confirm-modal').style.display = 'none'; currentAction = null; }
 
         function confirmCheck() {
             if(!currentAction) return;
@@ -331,16 +503,11 @@
 
             currentData.count += 1;
             currentData.history.push(actualPrice);
-
-            if (currentData.count >= sl) {
-                currentData.done = true;
-            }
+            if (currentData.count >= sl) currentData.done = true;
 
             trackingData[day][cat][index] = currentData;
             saveStatusToDB(day, cat, index, currentData);
-
-            closeModal();
-            renderData();
+            closeModal(); renderData();
         }
 
         function saveStatusToDB(day, cat, index, dataObj) {
@@ -354,18 +521,14 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ [path]: dataObj })
                     });
-                    setStatus("Đã lưu", "#2ecc71");
-                    setTimeout(() => setStatus(""), 2000);
-                } catch (e) {
-                    setStatus("Lỗi lưu DB", "red");
-                }
+                    setStatus("Đã lưu", "#2ecc71"); setTimeout(() => setStatus(""), 2000);
+                } catch (e) { setStatus("Lỗi lưu DB", "red"); }
             }, 1000);
         }
 
         function setStatus(text, color = "white") {
             let el = document.getElementById('status-msg');
-            el.innerText = text ? `(${text})` : "";
-            el.style.color = color;
+            el.innerText = text ? `(${text})` : ""; el.style.color = color;
         }
 
         function formatVND(num) {
@@ -373,14 +536,13 @@
             return Number(num).toLocaleString('vi-VN') + ' đ';
         }
 
+        // Core Render (Pending & History)
         function renderData() {
             const container = document.getElementById('data-container');
             container.innerHTML = "";
 
             let currentDayKey = getCurrentDayKey();
             let todayIndex = daysArr.indexOf(currentDayKey);
-            
-            // Pending: Xét từ thứ 2 tới hôm nay. History: Xét toàn bộ các ngày trong tuần
             let daysToRender = currentViewMode === 'pending' ? daysArr.slice(0, todayIndex + 1) : daysArr;
             
             let hasAnyVisibleItems = false;
@@ -395,9 +557,7 @@
                 let headerColor = currentViewMode === 'history' ? '#27ae60' : (isToday ? '#2980b9' : '#e67e22');
 
                 let dayHtml = `<div class="day-section">
-                                <div class="day-header" style="color: ${headerColor};">
-                                    ${headerTitle}
-                                </div>
+                                <div class="day-header" style="color: ${headerColor};">${headerTitle}</div>
                                 <table>
                                     <thead>
                                         <tr>
@@ -413,43 +573,28 @@
 
                 catsArr.forEach((catKey, cIdx) => {
                     let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
-                    
                     if (items.length > 0) {
-                        let catHtml = `<tbody>
-                                        <tr><td colspan="5" class="cat-row">- ${catsName[cIdx]}</td></tr>`;
+                        let catHtml = `<tbody><tr><td colspan="5" class="cat-row">- ${catsName[cIdx]}</td></tr>`;
                         let hasItemsInCat = false;
 
                         items.forEach((item, index) => {
                             let tData = trackingData[dayKey] && trackingData[dayKey][catKey] && trackingData[dayKey][catKey][index];
-                            
-                            let isDone = false;
-                            let count = 0;
-                            let totalSl = item.sl || 1;
+                            let isDone = false; let count = 0; let totalSl = item.sl || 1;
 
                             if (tData === true) { isDone = true; count = totalSl; }
-                            else if (tData && typeof tData === 'object') {
-                                isDone = tData.done;
-                                count = tData.count || 0;
-                            }
+                            else if (tData && typeof tData === 'object') { isDone = tData.done; count = tData.count || 0; }
 
-                            // Bộ lọc View
-                            if (currentViewMode === 'pending' && isDone) return; // Pending thì ẩn Đã xong
-                            if (currentViewMode === 'history' && !isDone) return; // History thì ẩn Chưa xong
+                            if (currentViewMode === 'pending' && isDone) return; 
+                            if (currentViewMode === 'history' && !isDone) return; 
 
-                            hasVisibleItemsInDay = true;
-                            hasItemsInCat = true;
-                            hasAnyVisibleItems = true;
+                            hasVisibleItemsInDay = true; hasItemsInCat = true; hasAnyVisibleItems = true;
 
                             let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
                             let title = `${cleanNd} ${item.dt ? ' | ' + item.dt : ''}`;
                             let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
                             let safeTitle = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
-                            // Xử lý UI Checkbox & Thành tiền theo Mode
-                            let checkHtml = '';
-                            let finalPriceStr = '';
-                            let displaySl = '';
-                            let rowCssClass = '';
+                            let checkHtml = ''; let finalPriceStr = ''; let displaySl = ''; let rowCssClass = '';
 
                             if (currentViewMode === 'pending') {
                                 let remainingSl = totalSl - count;
@@ -457,11 +602,8 @@
                                 finalPriceStr = formatVND(item.total);
                                 checkHtml = `<input type="checkbox" class="done-check" onclick="openConfirmModal('${dayKey}', '${catKey}', ${index}, '${safeTitle}', '${giaFormatted}', ${totalSl}, this)">`;
                             } else {
-                                displaySl = totalSl;
-                                rowCssClass = 'item-done'; // Gạch ngang và xám chữ
+                                displaySl = totalSl; rowCssClass = 'item-done'; 
                                 checkHtml = `<input type="checkbox" class="done-check" checked disabled>`;
-                                
-                                // Nếu Lịch sử, tính tổng tiền thực chi từ mảng history
                                 if (tData && tData.history && tData.history.length > 0) {
                                     let sumActual = tData.history.reduce((a, b) => a + Number(b || 0), 0);
                                     finalPriceStr = `<span style="color:#27ae60; font-weight:bold;">${formatVND(sumActual)}</span>`;
@@ -478,472 +620,25 @@
                                             <td class="col-tong">${finalPriceStr}</td>
                                         </tr>`;
                         });
-                        
                         catHtml += `</tbody>`;
                         if(hasItemsInCat) dayHtml += catHtml;
                     }
                 });
 
                 dayHtml += `</table></div>`;
-                
-                if(hasVisibleItemsInDay) {
-                    finalHtml += dayHtml;
-                }
+                if(hasVisibleItemsInDay) finalHtml += dayHtml;
             });
             
             if(!hasAnyVisibleItems) {
                 if(currentViewMode === 'pending') {
-                    container.innerHTML = `<div style="text-align:center; padding: 30px;">
-                                            <h2 style="color:#27ae60; margin-bottom: 5px;">Tuyệt vời!</h2>
-                                            <p style="color:#7f8c8d; font-style:italic; font-size:16px;">Bạn đã hoàn thành tất cả chi tiêu từ đầu tuần đến hiện tại.</p>
-                                           </div>`;
+                    container.innerHTML = `<div style="text-align:center; padding: 30px;"><h2 style="color:#27ae60; margin-bottom: 5px;">Tuyệt vời!</h2><p style="color:#7f8c8d; font-style:italic;">Bạn đã hoàn thành tất cả chi tiêu từ đầu tuần đến hiện tại.</p></div>`;
                 } else {
-                    container.innerHTML = `<div style="text-align:center; padding: 30px;">
-                                            <h2 style="color:#e74c3c; margin-bottom: 5px;">Trống!</h2>
-                                            <p style="color:#7f8c8d; font-style:italic; font-size:16px;">Bạn chưa hoàn thành khoản chi tiêu nào trong tuần này.</p>
-                                           </div>`;
+                    container.innerHTML = `<div style="text-align:center; padding: 30px;"><h2 style="color:#e74c3c; margin-bottom: 5px;">Trống!</h2><p style="color:#7f8c8d; font-style:italic;">Bạn chưa hoàn thành khoản chi tiêu nào trong tuần này.</p></div>`;
                 }
             } else {
                 container.innerHTML = finalHtml;
             }
         }
-        // --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT ---
-<script>
-        // CẤU HÌNH API
-        const READ_API_BASE = "https://kehoachthuchi-b923b-default-rtdb.asia-southeast1.firebasedatabase.app/usersData/";
-        const WRITE_API_BASE = "https://dulieuchitieu-2ca4d-default-rtdb.firebaseio.com/trackingData/";
-
-        let currentUserPhone = "";
-        let userDataCache = null; 
-        
-        let currentWeekKey = "";
-        let weekData = null; 
-        let trackingData = {}; 
-
-        const daysArr = ['thu-2', 'thu-3', 'thu-4', 'thu-5', 'thu-6', 'thu-7', 'chua-nhat'];
-        const daysName = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chúa nhật'];
-        const catsArr = ['ansang', 'antrua', 'antoi', 'dichuyen', 'tietkiem', 'khac'];
-        const catsName = ['Ăn sáng', 'Ăn trưa', 'Ăn tối', 'Di chuyển', 'Tiết kiệm', 'Khác'];
-
-        // Hàm lấy ngày chuẩn giờ Việt Nam để so sánh
-        function getGMT7Date() {
-            const d = new Date();
-            return new Date(d.getTime() + (d.getTimezoneOffset() * 60000) + (3600000 * 7));
-        }
-
-        // Hàm hỗ trợ tính toán WeekKey từ ngày
-        function getISOWeekNumber(date) {
-            const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-            return Math.ceil((((d - new Date(Date.UTC(d.getUTCFullYear(),0,1))) / 86400000) + 1)/7);
-        }
-        function getWeekKey(date) {
-            let w = getISOWeekNumber(date);
-            return date.getFullYear() + '-' + String(w).padStart(2, '0');
-        }
-
-        function showError(elementId, msg) {
-            let errEl = document.getElementById(elementId);
-            errEl.innerText = msg;
-            errEl.style.display = 'block';
-            document.getElementById('loading-overlay').style.display = 'none';
-            document.getElementById('verify-loading').style.display = 'none';
-        }
-
-        // --- TỰ ĐỘNG ĐĂNG NHẬP KHI MỞ TRANG ---
-        document.addEventListener("DOMContentLoaded", async function() {
-            let savedPhone = localStorage.getItem('tracking_phone');
-
-            if (savedPhone) {
-                document.getElementById('login-phone').value = savedPhone;
-                // Nếu có SĐT đã lưu, chạy trực tiếp hàm kiểm tra đăng nhập
-                await handleLogin(true); 
-            }
-        });
-
-
-        // --- BƯỚC 1: XỬ LÝ ĐĂNG NHẬP (Lấy SĐT & Tự Động Quét Mã) ---
-        async function handleLogin(isAuto = false) {
-            const phone = document.getElementById('login-phone').value.trim();
-            if (!phone) return showError("login-error", "Vui lòng nhập SĐT!");
-            
-            document.getElementById('login-error').style.display = 'none';
-            document.getElementById('loading-overlay').style.display = 'flex';
-
-            try {
-                let res = await fetch(`${READ_API_BASE}${phone}.json`);
-                let data = await res.json();
-
-                if (!data) {
-                    localStorage.removeItem('tracking_phone');
-                    return showError("login-error", "Tài khoản này chưa tồn tại dữ liệu trên hệ thống!");
-                }
-
-                userDataCache = data;
-                currentUserPhone = phone;
-                
-                // Lưu SĐT vào máy để lần sau tự vào
-                localStorage.setItem('tracking_phone', phone);
-
-                // --- TỰ ĐỘNG TÌM MÃ ĐỐI SOÁT HỢP LỆ TRONG DATABASE ---
-                let autoValidCode = null;
-                let realCurrentWeekKey = getWeekKey(getGMT7Date());
-
-                if (data.printHistory && data.printHistory.length > 0) {
-                    // Duyệt ngược từ cuối (bản in mới nhất) lên đầu
-                    for (let i = data.printHistory.length - 1; i >= 0; i--) {
-                        let h = data.printHistory[i];
-                        
-                        // Nếu bản in này ĐÃ BỊ HỦY -> Bỏ qua
-                        if (h.cancelData && h.cancelData.isCancelled) continue;
-
-                        // Kiểm tra xem phiếu có đúng tuần hiện tại không
-                        let dateParts = h.dateStr.split('-');
-                        if (dateParts.length >= 3) {
-                            let ticketWeekKey = `${dateParts[0]}-${String(h.week).padStart(2, '0')}`;
-                            if (ticketWeekKey === realCurrentWeekKey) {
-                                // Nếu chưa bị hủy VÀ thuộc đúng tuần này -> BẮT ĐƯỢC MÃ!
-                                autoValidCode = h.asciiCode;
-                                break; 
-                            }
-                        }
-                    }
-                }
-
-                document.getElementById('loading-overlay').style.display = 'none';
-                document.getElementById('login-screen').style.display = 'none';
-                
-                // NẾU TÌM THẤY MÃ CÒN SỬ DỤNG ĐƯỢC TRÊN SERVER
-                if (autoValidCode) {
-                    // Tự động điền mã và đẩy sang màn hình App luôn
-                    document.getElementById('login-code').value = autoValidCode;
-                    await handleVerifyCode(true);
-                } else {
-                    // NẾU KHÔNG CÓ MÃ HOẶC TẤT CẢ CÁC MÃ ĐỀU HẾT HẠN / BỊ HỦY
-                    document.getElementById('verify-screen').style.display = 'flex';
-                    document.getElementById('display-phone-verify').innerText = phone;
-                    document.getElementById('login-code').value = ""; 
-                }
-
-            } catch (err) {
-                console.error(err);
-                showError("login-error", "Lỗi kết nối đến Server!");
-            }
-        }
-
-
-        // --- BƯỚC 2: XÁC THỰC MÃ ĐỐI SOÁT MANUALLY & KIỂM TRA HẠN ---
-        async function handleVerifyCode(isAuto = false) {
-            const code = document.getElementById('login-code').value.trim();
-            if (!code) return showError("verify-error", "Vui lòng nhập Mã đối soát!");
-
-            document.getElementById('verify-error').style.display = 'none';
-            document.getElementById('verify-loading').style.display = 'flex';
-            
-            // Nếu gọi từ AutoLogin, chuẩn bị sẵn giao diện Verify nhỡ gặp lỗi
-            if (isAuto) {
-                document.getElementById('verify-screen').style.display = 'flex';
-                document.getElementById('display-phone-verify').innerText = currentUserPhone;
-            }
-
-            try {
-                if (!userDataCache.printHistory) {
-                    return showError("verify-error", "Tài khoản này chưa từng in kế hoạch nào!");
-                }
-
-                // 1. Tìm mã đối soát người dùng nhập
-                let historyItem = userDataCache.printHistory.find(h => h.asciiCode === code);
-                if (!historyItem) {
-                    return showError("verify-error", "Mã đối soát không tồn tại hoặc sai chữ hoa/thường!");
-                }
-
-                // 2. Kiểm tra hủy
-                if (historyItem.cancelData && historyItem.cancelData.isCancelled) {
-                    let reason = historyItem.cancelData.reason || "Không có lý do";
-                    return showError("verify-error", `Bản in này ĐÃ BỊ HỦY!\nLý do: ${reason}\nVui lòng nhập mã của bản in mới nhất.`);
-                }
-
-                // 3. Tính toán và KIỂM TRA HẠN SỬ DỤNG CỦA PHIẾU
-                let dateParts = historyItem.dateStr.split('-'); 
-                if (dateParts.length < 3) {
-                    return showError("verify-error", "Lỗi định dạng ngày tháng trên hệ thống!");
-                }
-                
-                let year = dateParts[0];
-                let weekNum = historyItem.week; 
-                let ticketWeekKey = `${year}-${String(weekNum).padStart(2, '0')}`;
-                
-                // Lấy tuần hiện hành của thế giới thực để so sánh
-                let realCurrentWeekKey = getWeekKey(getGMT7Date());
-
-                // Nếu Tuần của phiếu KHÁC với Tuần hiện tại -> Hết hạn
-                if (ticketWeekKey !== realCurrentWeekKey) {
-                    return showError("verify-error", `Phiếu kiểm toán (Tuần ${weekNum}) đã hết hạn sử dụng cho tuần này.\nVui lòng nhập mã đối soát của bản in tuần mới!`);
-                }
-
-                currentWeekKey = ticketWeekKey;
-
-                // 4. Lấy dữ liệu chi tiêu
-                if (!userDataCache.allWeeksData || !userDataCache.allWeeksData[currentWeekKey]) {
-                    return showError("verify-error", `Không tìm thấy dữ liệu trên hệ thống cho tuần [${currentWeekKey}]!`);
-                }
-
-                weekData = userDataCache.allWeeksData[currentWeekKey].expenses || {};
-
-                // Load trạng thái checkbox từ DB Mới
-                await loadTrackingData();
-
-                // Đổi UI sang App
-                document.getElementById('verify-loading').style.display = 'none';
-                document.getElementById('verify-screen').style.display = 'none';
-                document.getElementById('main-app').style.display = 'block';
-                document.getElementById('user-info').innerText = `SĐT: ${currentUserPhone}`;
-                document.getElementById('display-week').innerText = currentWeekKey;
-                document.getElementById('display-code').innerText = code;
-
-                renderData();
-
-            } catch (err) {
-                console.error(err);
-                showError("verify-error", "Có lỗi xảy ra trong quá trình giải mã!");
-            }
-        }
-
-
-        // --- NÚT ĐIỀU HƯỚNG ---
-        function backToLogin() {
-            currentUserPhone = "";
-            userDataCache = null;
-            localStorage.removeItem('tracking_phone');
-
-            document.getElementById('verify-error').style.display = 'none';
-            document.getElementById('verify-screen').style.display = 'none';
-            document.getElementById('login-screen').style.display = 'flex';
-            document.getElementById('login-phone').value = "";
-        }
-
-        function backToVerify() {
-            currentWeekKey = "";
-            weekData = null;
-
-            document.getElementById('login-code').value = "";
-            document.getElementById('verify-error').style.display = 'none';
-            document.getElementById('main-app').style.display = 'none';
-            document.getElementById('verify-screen').style.display = 'flex';
-        }
-
-        function logout() {
-            backToLogin();
-            document.getElementById('main-app').style.display = 'none';
-        }
-
-        // --- XỬ LÝ ĐỌC/GHI TRẠNG THÁI (DB MỚI) ---
-        async function loadTrackingData() {
-            setStatus("Đang đồng bộ...");
-            try {
-                let res = await fetch(`${WRITE_API_BASE}${currentUserPhone}/${currentWeekKey}.json`);
-                let data = await res.json();
-                trackingData = data || {};
-                setStatus("");
-            } catch (err) {
-                console.error(err);
-                setStatus("Lỗi đồng bộ", "red");
-            }
-        }
-
-        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT ---
-        // Hàm tính ngày hiện tại để chỉ show dữ liệu hôm nay
-        function getCurrentDayKey() {
-            let dayNum = getGMT7Date().getDay(); // 0 là Chủ nhật
-            if(dayNum === 0) return 'chua-nhat';
-            return `thu-${dayNum + 1}`;
-        }
-
-        // Ghi đè hàm cũ để ẩn bảng điều khiển
-        function toggleViewMode() { renderData(); }
-
-        let saveTimer; 
-        let currentAction = null;
-
-        // Xử lý khi nhấn nút tick
-        function openConfirmModal(day, cat, index, title, price, sl, checkboxEl) {
-            checkboxEl.checked = false; // Ngăn tick liền
-            let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
-            
-            document.getElementById('modal-title').innerText = title;
-            document.getElementById('modal-price').value = numericPrice;
-            
-            currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
-            document.getElementById('confirm-modal').style.display = 'flex';
-        }
-
-        function closeModal() {
-            document.getElementById('confirm-modal').style.display = 'none';
-            currentAction = null;
-        }
-
-        function confirmCheck() {
-            if(!currentAction) return;
-            let {day, cat, index, sl} = currentAction;
-            let actualPrice = document.getElementById('modal-price').value;
-
-            if (!trackingData[day]) trackingData[day] = {};
-            if (!trackingData[day][cat]) trackingData[day][cat] = {};
-
-            let currentData = trackingData[day][cat][index];
-            if (typeof currentData === 'boolean') {
-                currentData = { count: currentData ? sl : 0, done: currentData, history: [] };
-            } else if (!currentData) {
-                currentData = { count: 0, done: false, history: [] };
-            }
-
-            currentData.count += 1;
-            currentData.history.push(actualPrice);
-
-            if (currentData.count >= sl) {
-                currentData.done = true;
-            }
-
-            trackingData[day][cat][index] = currentData;
-            saveStatusToDB(day, cat, index, currentData);
-
-            closeModal();
-            renderData();
-        }
-
-        function saveStatusToDB(day, cat, index, dataObj) {
-            setStatus("Đang lưu...", "orange");
-            clearTimeout(saveTimer);
-            saveTimer = setTimeout(async () => {
-                try {
-                    let path = `${day}/${cat}/${index}`;
-                    await fetch(`${WRITE_API_BASE}${currentUserPhone}/${currentWeekKey}.json`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ [path]: dataObj })
-                    });
-                    setStatus("Đã lưu", "#2ecc71");
-                    setTimeout(() => setStatus(""), 2000);
-                } catch (e) {
-                    setStatus("Lỗi lưu DB", "red");
-                }
-            }, 1000);
-        }
-
-        function setStatus(text, color = "white") {
-            let el = document.getElementById('status-msg');
-            el.innerText = text ? `(${text})` : "";
-            el.style.color = color;
-        }
-
-        function formatVND(num) {
-            if (num === undefined || num === null) return '0 đ';
-            return Number(num).toLocaleString('vi-VN') + ' đ';
-        }
-
-        function renderData() {
-            const container = document.getElementById('data-container');
-            container.innerHTML = "";
-
-            let currentDayKey = getCurrentDayKey();
-            let todayIndex = daysArr.indexOf(currentDayKey);
-            
-            // Lấy danh sách các ngày từ thứ 2 cho đến hôm nay
-            let daysToRender = daysArr.slice(0, todayIndex + 1);
-            
-            let hasAnyVisibleItems = false;
-            let finalHtml = "";
-
-            daysToRender.forEach(dayKey => {
-                let dayIndex = daysArr.indexOf(dayKey);
-                let dayName = daysName[dayIndex];
-                let isToday = (dayKey === currentDayKey);
-                
-                let dayHtml = `<div class="day-section">
-                                <div class="day-header" style="color: ${isToday ? '#2980b9' : '#e67e22'};">
-                                    ${isToday ? 'HÔM NAY: ' : 'TỒN ĐỌNG: '} ${dayName}
-                                </div>
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th class="col-check">Xong</th>
-                                            <th class="col-nd">Nội dung / Đối tượng</th>
-                                            <th class="col-gia">Giá</th>
-                                            <th class="col-sl">SL Còn</th>
-                                            <th class="col-tong">Thành tiền</th>
-                                        </tr>
-                                    </thead>`;
-
-                let hasVisibleItemsInDay = false;
-
-                catsArr.forEach((catKey, cIdx) => {
-                    let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
-                    
-                    if (items.length > 0) {
-                        let catHtml = `<tbody>
-                                        <tr><td colspan="5" class="cat-row">- ${catsName[cIdx]}</td></tr>`;
-                        let hasItemsInCat = false;
-
-                        items.forEach((item, index) => {
-                            let tData = trackingData[dayKey] && trackingData[dayKey][catKey] && trackingData[dayKey][catKey][index];
-                            
-                            let isDone = false;
-                            let count = 0;
-                            let totalSl = item.sl || 1;
-
-                            if (tData === true) { isDone = true; count = totalSl; }
-                            else if (tData && typeof tData === 'object') {
-                                isDone = tData.done;
-                                count = tData.count || 0;
-                            }
-
-                            if (isDone) return; // Ẩn mục đã hoàn thành
-
-                            hasVisibleItemsInDay = true;
-                            hasItemsInCat = true;
-                            hasAnyVisibleItems = true;
-
-                            let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
-                            let title = `${cleanNd} ${item.dt ? ' | ' + item.dt : ''}`;
-                            let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
-                            let remainingSl = totalSl - count;
-                            let safeTitle = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-
-                            catHtml += `<tr id="row-${dayKey}-${catKey}-${index}">
-                                            <td class="col-check">
-                                                <input type="checkbox" class="done-check" 
-                                                onclick="openConfirmModal('${dayKey}', '${catKey}', ${index}, '${safeTitle}', '${giaFormatted}', ${totalSl}, this)">
-                                            </td>
-                                            <td>${title}</td>
-                                            <td class="col-gia">${formatVND(giaFormatted)}</td>
-                                            <td class="col-sl" style="font-weight:bold; color:#e74c3c;">${remainingSl}</td>
-                                            <td class="col-tong">${formatVND(item.total)}</td>
-                                        </tr>`;
-                        });
-                        
-                        catHtml += `</tbody>`;
-                        if(hasItemsInCat) dayHtml += catHtml;
-                    }
-                });
-
-                dayHtml += `</table></div>`;
-                
-                // Chỉ hiển thị bảng của ngày đó nếu có ít nhất 1 mục chưa hoàn thành
-                if(hasVisibleItemsInDay) {
-                    finalHtml += dayHtml;
-                }
-            });
-            
-            if(!hasAnyVisibleItems) {
-                container.innerHTML = `<div style="text-align:center; padding: 30px;">
-                                        <h2 style="color:#27ae60; margin-bottom: 5px;">Tuyệt vời!</h2>
-                                        <p style="color:#7f8c8d; font-style:italic; font-size:16px;">Bạn đã hoàn thành tất cả chi tiêu từ đầu tuần đến hiện tại.</p>
-                                       </div>`;
-            } else {
-                container.innerHTML = finalHtml;
-            }
-        }
-        // --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT ---
     </script>
 </body>
 </html>
