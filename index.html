@@ -197,10 +197,16 @@
             color: #f39c12;
             margin-left: 15px;
         }
-        /* --- BẮT ĐẦU CHỈNH SỬA MODULE CSS --- */
-        /* Ẩn phần chọn ngày/tuần cũ */
-        .controls-area {
-            display: none !important;
+/* --- BẮT ĐẦU CHỈNH SỬA MODULE CSS --- */
+        .tab-container {
+            display: flex; justify-content: center; gap: 15px; margin-bottom: 25px;
+        }
+        .tab-btn {
+            padding: 10px 20px; font-size: 16px; font-weight: bold; border: 2px solid #3498db;
+            background: white; color: #3498db; border-radius: 8px; cursor: pointer; transition: 0.3s;
+        }
+        .tab-btn.active {
+            background: #3498db; color: white;
         }
 
         /* Giao diện Modal Xác Nhận */
@@ -268,46 +274,240 @@
         </div>
 
         <div class="container">
-            <div class="controls-area">
-                <div class="toggle-group">
-                    <span>Xem toàn bộ</span>
-                    <label class="switch">
-                        <input type="checkbox" id="view-toggle" onchange="toggleViewMode()">
-                        <span class="slider"></span>
-                    </label>
-                    <span>Xem từng ngày</span>
-                </div>
+            <div class="tab-container">
+                <button id="tab-pending" class="tab-btn active" onclick="switchView('pending')">CẦN CHI TIÊU</button>
+                <button id="tab-history" class="tab-btn" onclick="switchView('history')">LỊCH SỬ ĐÃ TICK</button>
+            </div>
+        let currentViewMode = 'pending'; // 'pending' hoặc 'history'
+
+        function switchView(mode) {
+            currentViewMode = mode;
+            document.getElementById('tab-pending').classList.toggle('active', mode === 'pending');
+            document.getElementById('tab-history').classList.toggle('active', mode === 'history');
+            renderData();
+        }
+
+        // Hàm tính ngày hiện tại để chỉ show dữ liệu hôm nay
+        function getCurrentDayKey() {
+            let dayNum = getGMT7Date().getDay(); // 0 là Chủ nhật
+            if(dayNum === 0) return 'chua-nhat';
+            return `thu-${dayNum + 1}`;
+        }
+
+        let saveTimer; 
+        let currentAction = null;
+
+        // Xử lý khi nhấn nút tick
+        function openConfirmModal(day, cat, index, title, price, sl, checkboxEl) {
+            checkboxEl.checked = false; // Ngăn tick liền
+            let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
+            
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-price').value = numericPrice;
+            
+            currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
+            document.getElementById('confirm-modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('confirm-modal').style.display = 'none';
+            currentAction = null;
+        }
+
+        function confirmCheck() {
+            if(!currentAction) return;
+            let {day, cat, index, sl} = currentAction;
+            let actualPrice = document.getElementById('modal-price').value;
+
+            if (!trackingData[day]) trackingData[day] = {};
+            if (!trackingData[day][cat]) trackingData[day][cat] = {};
+
+            let currentData = trackingData[day][cat][index];
+            if (typeof currentData === 'boolean') {
+                currentData = { count: currentData ? sl : 0, done: currentData, history: [] };
+            } else if (!currentData) {
+                currentData = { count: 0, done: false, history: [] };
+            }
+
+            currentData.count += 1;
+            currentData.history.push(actualPrice);
+
+            if (currentData.count >= sl) {
+                currentData.done = true;
+            }
+
+            trackingData[day][cat][index] = currentData;
+            saveStatusToDB(day, cat, index, currentData);
+
+            closeModal();
+            renderData();
+        }
+
+        function saveStatusToDB(day, cat, index, dataObj) {
+            setStatus("Đang lưu...", "orange");
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(async () => {
+                try {
+                    let path = `${day}/${cat}/${index}`;
+                    await fetch(`${WRITE_API_BASE}${currentUserPhone}/${currentWeekKey}.json`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ [path]: dataObj })
+                    });
+                    setStatus("Đã lưu", "#2ecc71");
+                    setTimeout(() => setStatus(""), 2000);
+                } catch (e) {
+                    setStatus("Lỗi lưu DB", "red");
+                }
+            }, 1000);
+        }
+
+        function setStatus(text, color = "white") {
+            let el = document.getElementById('status-msg');
+            el.innerText = text ? `(${text})` : "";
+            el.style.color = color;
+        }
+
+        function formatVND(num) {
+            if (num === undefined || num === null) return '0 đ';
+            return Number(num).toLocaleString('vi-VN') + ' đ';
+        }
+
+        function renderData() {
+            const container = document.getElementById('data-container');
+            container.innerHTML = "";
+
+            let currentDayKey = getCurrentDayKey();
+            let todayIndex = daysArr.indexOf(currentDayKey);
+            
+            // Pending: Xét từ thứ 2 tới hôm nay. History: Xét toàn bộ các ngày trong tuần
+            let daysToRender = currentViewMode === 'pending' ? daysArr.slice(0, todayIndex + 1) : daysArr;
+            
+            let hasAnyVisibleItems = false;
+            let finalHtml = "";
+
+            daysToRender.forEach(dayKey => {
+                let dayIndex = daysArr.indexOf(dayKey);
+                let dayName = daysName[dayIndex];
+                let isToday = (dayKey === currentDayKey);
                 
-                <select id="day-selector" onchange="renderData()">
-                    <option value="thu-2">Thứ 2</option>
-                    <option value="thu-3">Thứ 3</option>
-                    <option value="thu-4">Thứ 4</option>
-                    <option value="thu-5">Thứ 5</option>
-                    <option value="thu-6">Thứ 6</option>
-                    <option value="thu-7">Thứ 7</option>
-                    <option value="chua-nhat">Chúa nhật</option>
-                </select>
-            </div>
+                let headerTitle = currentViewMode === 'history' ? `ĐÃ HOÀN THÀNH: ${dayName}` : (isToday ? `HÔM NAY: ${dayName}` : `TỒN ĐỌNG: ${dayName}`);
+                let headerColor = currentViewMode === 'history' ? '#27ae60' : (isToday ? '#2980b9' : '#e67e22');
 
-            <h3 style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; line-height: 1.5;">
-                DỮ LIỆU TUẦN: <span id="display-week" style="color:#e74c3c;">...</span><br>
-                <span style="font-size: 14px; color: #7f8c8d; font-family: monospace;">Mã đối soát: <span id="display-code"></span></span>
-            </h3>
+                let dayHtml = `<div class="day-section">
+                                <div class="day-header" style="color: ${headerColor};">
+                                    ${headerTitle}
+                                </div>
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th class="col-check">Xong</th>
+                                            <th class="col-nd">Nội dung / Đối tượng</th>
+                                            <th class="col-gia">${currentViewMode === 'history' ? 'Giá Dự Kiến' : 'Giá'}</th>
+                                            <th class="col-sl">${currentViewMode === 'history' ? 'SL' : 'SL Còn'}</th>
+                                            <th class="col-tong">${currentViewMode === 'history' ? 'Thực Chi' : 'Thành tiền'}</th>
+                                        </tr>
+                                    </thead>`;
 
-            <div id="data-container"></div>
-        </div>
-        <div id="confirm-modal">
-            <div class="modal-content">
-                <h3>XÁC NHẬN CHI TIÊU</h3>
-                <p id="modal-title" style="font-weight: bold; color: #e67e22; font-size: 18px; margin-bottom: 20px; word-wrap: break-word;"></p>
-                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Số tiền thực chi (VNĐ):</label>
-                <input type="number" id="modal-price" placeholder="Nhập số tiền chi...">
-                <div class="modal-btns">
-                    <button class="btn-cancel" onclick="closeModal()">Hủy</button>
-                    <button class="btn-confirm" onclick="confirmCheck()">Hoàn Thành</button>
-                </div>
-            </div>
-        </div>
+                let hasVisibleItemsInDay = false;
+
+                catsArr.forEach((catKey, cIdx) => {
+                    let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
+                    
+                    if (items.length > 0) {
+                        let catHtml = `<tbody>
+                                        <tr><td colspan="5" class="cat-row">- ${catsName[cIdx]}</td></tr>`;
+                        let hasItemsInCat = false;
+
+                        items.forEach((item, index) => {
+                            let tData = trackingData[dayKey] && trackingData[dayKey][catKey] && trackingData[dayKey][catKey][index];
+                            
+                            let isDone = false;
+                            let count = 0;
+                            let totalSl = item.sl || 1;
+
+                            if (tData === true) { isDone = true; count = totalSl; }
+                            else if (tData && typeof tData === 'object') {
+                                isDone = tData.done;
+                                count = tData.count || 0;
+                            }
+
+                            // Bộ lọc View
+                            if (currentViewMode === 'pending' && isDone) return; // Pending thì ẩn Đã xong
+                            if (currentViewMode === 'history' && !isDone) return; // History thì ẩn Chưa xong
+
+                            hasVisibleItemsInDay = true;
+                            hasItemsInCat = true;
+                            hasAnyVisibleItems = true;
+
+                            let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
+                            let title = `${cleanNd} ${item.dt ? ' | ' + item.dt : ''}`;
+                            let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
+                            let safeTitle = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+                            // Xử lý UI Checkbox & Thành tiền theo Mode
+                            let checkHtml = '';
+                            let finalPriceStr = '';
+                            let displaySl = '';
+                            let rowCssClass = '';
+
+                            if (currentViewMode === 'pending') {
+                                let remainingSl = totalSl - count;
+                                displaySl = `<span style="color:#e74c3c;">${remainingSl}</span>`;
+                                finalPriceStr = formatVND(item.total);
+                                checkHtml = `<input type="checkbox" class="done-check" onclick="openConfirmModal('${dayKey}', '${catKey}', ${index}, '${safeTitle}', '${giaFormatted}', ${totalSl}, this)">`;
+                            } else {
+                                displaySl = totalSl;
+                                rowCssClass = 'item-done'; // Gạch ngang và xám chữ
+                                checkHtml = `<input type="checkbox" class="done-check" checked disabled>`;
+                                
+                                // Nếu Lịch sử, tính tổng tiền thực chi từ mảng history
+                                if (tData && tData.history && tData.history.length > 0) {
+                                    let sumActual = tData.history.reduce((a, b) => a + Number(b || 0), 0);
+                                    finalPriceStr = `<span style="color:#27ae60; font-weight:bold;">${formatVND(sumActual)}</span>`;
+                                } else {
+                                    finalPriceStr = `<span style="color:#27ae60; font-weight:bold;">${formatVND(item.total)}</span>`;
+                                }
+                            }
+
+                            catHtml += `<tr id="row-${dayKey}-${catKey}-${index}" class="${rowCssClass}">
+                                            <td class="col-check">${checkHtml}</td>
+                                            <td>${title}</td>
+                                            <td class="col-gia">${formatVND(giaFormatted)}</td>
+                                            <td class="col-sl" style="font-weight:bold;">${displaySl}</td>
+                                            <td class="col-tong">${finalPriceStr}</td>
+                                        </tr>`;
+                        });
+                        
+                        catHtml += `</tbody>`;
+                        if(hasItemsInCat) dayHtml += catHtml;
+                    }
+                });
+
+                dayHtml += `</table></div>`;
+                
+                if(hasVisibleItemsInDay) {
+                    finalHtml += dayHtml;
+                }
+            });
+            
+            if(!hasAnyVisibleItems) {
+                if(currentViewMode === 'pending') {
+                    container.innerHTML = `<div style="text-align:center; padding: 30px;">
+                                            <h2 style="color:#27ae60; margin-bottom: 5px;">Tuyệt vời!</h2>
+                                            <p style="color:#7f8c8d; font-style:italic; font-size:16px;">Bạn đã hoàn thành tất cả chi tiêu từ đầu tuần đến hiện tại.</p>
+                                           </div>`;
+                } else {
+                    container.innerHTML = `<div style="text-align:center; padding: 30px;">
+                                            <h2 style="color:#e74c3c; margin-bottom: 5px;">Trống!</h2>
+                                            <p style="color:#7f8c8d; font-style:italic; font-size:16px;">Bạn chưa hoàn thành khoản chi tiêu nào trong tuần này.</p>
+                                           </div>`;
+                }
+            } else {
+                container.innerHTML = finalHtml;
+            }
+        }
+        // --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT ---
 <script>
         // CẤU HÌNH API
         const READ_API_BASE = "https://kehoachthuchi-b923b-default-rtdb.asia-southeast1.firebasedatabase.app/usersData/";
