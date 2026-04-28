@@ -308,277 +308,7 @@
                 </div>
             </div>
         </div>
-      // Hàm tính ngày hiện tại để chỉ show dữ liệu hôm nay
-        function getCurrentDayKey() {
-            let dayNum = getGMT7Date().getDay(); // 0 là Chủ nhật
-            if(dayNum === 0) return 'chua-nhat';
-            return `thu-${dayNum + 1}`;
-        }
-
-        // Ghi đè hàm cũ (để không bị lỗi console nếu HTML cũ vẫn gọi)
-        function toggleViewMode() { renderData(); }
-        function updateTaskStatus() { /* Đã vô hiệu hóa để dùng logic Modal */ }
-
-        let saveTimer; 
-        let currentAction = null;
-
-        // Xử lý khi nhấn nút tick
-        function openConfirmModal(day, cat, index, title, price, sl, checkboxEl) {
-            // Ngăn checkbox hiện dấu tick ngay lập tức
-            checkboxEl.checked = false; 
-            
-            let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
-            
-            document.getElementById('modal-title').innerText = title;
-            document.getElementById('modal-price').value = numericPrice;
-            
-            currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
-            document.getElementById('confirm-modal').style.display = 'flex';
-        }
-
-        function closeModal() {
-            document.getElementById('confirm-modal').style.display = 'none';
-            currentAction = null;
-        }
-
-        function confirmCheck() {
-            if(!currentAction) return;
-            let {day, cat, index, sl} = currentAction;
-            let actualPrice = document.getElementById('modal-price').value;
-
-            if (!trackingData[day]) trackingData[day] = {};
-            if (!trackingData[day][cat]) trackingData[day][cat] = {};
-
-            // Xử lý cơ sở dữ liệu: Dùng Object để lưu số lần thay vì Boolean
-            let currentData = trackingData[day][cat][index];
-            if (typeof currentData === 'boolean') {
-                currentData = { count: currentData ? sl : 0, done: currentData, history: [] };
-            } else if (!currentData) {
-                currentData = { count: 0, done: false, history: [] };
-            }
-
-            // Tăng số lần chi và lưu số tiền
-            currentData.count += 1;
-            currentData.history.push(actualPrice);
-
-            // Kiểm tra nếu đã đủ số lượng -> hoàn thành
-            if (currentData.count >= sl) {
-                currentData.done = true;
-            }
-
-            trackingData[day][cat][index] = currentData;
-            saveStatusToDB(day, cat, index, currentData);
-
-            closeModal();
-            renderData(); // Render lại để mục đã xong biến mất khỏi màn hình
-        }
-
-        function saveStatusToDB(day, cat, index, dataObj) {
-            setStatus("Đang lưu...", "orange");
-            clearTimeout(saveTimer);
-            saveTimer = setTimeout(async () => {
-                try {
-                    let path = `${day}/${cat}/${index}`;
-                    await fetch(`${WRITE_API_BASE}${currentUserPhone}/${currentWeekKey}.json`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ [path]: dataObj })
-                    });
-                    setStatus("Đã lưu", "#2ecc71");
-                    setTimeout(() => setStatus(""), 2000);
-                } catch (e) {
-                    setStatus("Lỗi lưu DB", "red");
-                }
-            }, 1000);
-        }
-
-        // Render lại dữ liệu
-        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT ---
-
-        // Hàm tính ngày hiện tại để chỉ show dữ liệu hôm nay
-        function getCurrentDayKey() {
-            let dayNum = getGMT7Date().getDay(); // 0 là Chủ nhật
-            if(dayNum === 0) return 'chua-nhat';
-            return `thu-${dayNum + 1}`;
-        }
-
-        // Ghi đè hàm cũ để không bị lỗi nếu HTML vẫn gọi
-        function toggleViewMode() { renderData(); }
-
-        let saveTimer; 
-        let currentAction = null;
-
-        // Xử lý khi nhấn nút tick
-        function openConfirmModal(day, cat, index, title, price, sl, checkboxEl) {
-            // Ngăn checkbox hiện dấu tick ngay lập tức
-            checkboxEl.checked = false; 
-            
-            let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
-            
-            document.getElementById('modal-title').innerText = title;
-            document.getElementById('modal-price').value = numericPrice;
-            
-            currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
-            document.getElementById('confirm-modal').style.display = 'flex';
-        }
-
-        function closeModal() {
-            document.getElementById('confirm-modal').style.display = 'none';
-            currentAction = null;
-        }
-
-        function confirmCheck() {
-            if(!currentAction) return;
-            let {day, cat, index, sl} = currentAction;
-            let actualPrice = document.getElementById('modal-price').value;
-
-            if (!trackingData[day]) trackingData[day] = {};
-            if (!trackingData[day][cat]) trackingData[day][cat] = {};
-
-            // Dùng Object để lưu số lần thay vì Boolean
-            let currentData = trackingData[day][cat][index];
-            if (typeof currentData === 'boolean') {
-                currentData = { count: currentData ? sl : 0, done: currentData, history: [] };
-            } else if (!currentData) {
-                currentData = { count: 0, done: false, history: [] };
-            }
-
-            // Tăng số lần chi và lưu số tiền
-            currentData.count += 1;
-            currentData.history.push(actualPrice);
-
-            // Kiểm tra nếu đã đủ số lượng -> hoàn thành
-            if (currentData.count >= sl) {
-                currentData.done = true;
-            }
-
-            trackingData[day][cat][index] = currentData;
-            saveStatusToDB(day, cat, index, currentData);
-
-            closeModal();
-            renderData(); // Render lại để mục đã xong biến mất
-        }
-
-        function saveStatusToDB(day, cat, index, dataObj) {
-            setStatus("Đang lưu...", "orange");
-            clearTimeout(saveTimer);
-            saveTimer = setTimeout(async () => {
-                try {
-                    let path = `${day}/${cat}/${index}`;
-                    await fetch(`${WRITE_API_BASE}${currentUserPhone}/${currentWeekKey}.json`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ [path]: dataObj })
-                    });
-                    setStatus("Đã lưu", "#2ecc71");
-                    setTimeout(() => setStatus(""), 2000);
-                } catch (e) {
-                    setStatus("Lỗi lưu DB", "red");
-                }
-            }, 1000);
-        }
-
-        function setStatus(text, color = "white") {
-            let el = document.getElementById('status-msg');
-            el.innerText = text ? `(${text})` : "";
-            el.style.color = color;
-        }
-
-        function formatVND(num) {
-            if (num === undefined || num === null) return '0 đ';
-            return Number(num).toLocaleString('vi-VN') + ' đ';
-        }
-
-        // Render lại dữ liệu
-        function renderData() {
-            const container = document.getElementById('data-container');
-            container.innerHTML = "";
-
-            let currentDayKey = getCurrentDayKey();
-            let dayIndex = daysArr.indexOf(currentDayKey);
-            let dayName = dayIndex !== -1 ? daysName[dayIndex] : "Không xác định";
-
-            let html = `<div class="day-section">
-                            <div class="day-header">HÔM NAY: ${dayName}</div>
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th class="col-check">Xong</th>
-                                        <th class="col-nd">Nội dung / Đối tượng</th>
-                                        <th class="col-gia">Giá</th>
-                                        <th class="col-sl">SL Còn</th>
-                                        <th class="col-tong">Thành tiền</th>
-                                    </tr>
-                                </thead>`;
-
-            let hasVisibleItems = false;
-
-            catsArr.forEach((catKey, cIdx) => {
-                let items = (weekData && weekData[currentDayKey] && weekData[currentDayKey][catKey]) ? weekData[currentDayKey][catKey] : [];
-                
-                if (items.length > 0) {
-                    let catHtml = `<tbody>
-                                    <tr><td colspan="5" class="cat-row">- ${catsName[cIdx]}</td></tr>`;
-                    let hasItemsInCat = false;
-
-                    items.forEach((item, index) => {
-                        let tData = trackingData[currentDayKey] && trackingData[currentDayKey][catKey] && trackingData[currentDayKey][catKey][index];
-                        
-                        let isDone = false;
-                        let count = 0;
-                        let totalSl = item.sl || 1;
-
-                        if (tData === true) { isDone = true; count = totalSl; }
-                        else if (tData && typeof tData === 'object') {
-                            isDone = tData.done;
-                            count = tData.count || 0;
-                        }
-
-                        // Ẩn đi nếu đã hoàn thành đủ số lượng
-                        if (isDone) return; 
-
-                        hasVisibleItems = true;
-                        hasItemsInCat = true;
-
-                        let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
-                        let title = `${cleanNd} ${item.dt ? ' | ' + item.dt : ''}`;
-                        let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
-                        let remainingSl = totalSl - count;
-
-                        // Xử lý chuỗi để tránh lỗi HTML
-                        let safeTitle = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-
-                        catHtml += `<tr id="row-${currentDayKey}-${catKey}-${index}">
-                                        <td class="col-check">
-                                            <input type="checkbox" class="done-check" 
-                                            onclick="openConfirmModal('${currentDayKey}', '${catKey}', ${index}, '${safeTitle}', '${giaFormatted}', ${totalSl}, this)">
-                                        </td>
-                                        <td>${title}</td>
-                                        <td class="col-gia">${formatVND(giaFormatted)}</td>
-                                        <td class="col-sl" style="font-weight:bold; color:#e74c3c;">${remainingSl}</td>
-                                        <td class="col-tong">${formatVND(item.total)}</td>
-                                    </tr>`;
-                    });
-                    
-                    catHtml += `</tbody>`;
-                    if(hasItemsInCat) html += catHtml;
-                }
-            });
-
-            html += `</table></div>`;
-            
-            if(!hasVisibleItems) {
-                container.innerHTML = `<div style="text-align:center; padding: 30px;">
-                                        <h2 style="color:#27ae60; margin-bottom: 5px;">Tuyệt vời!</h2>
-                                        <p style="color:#7f8c8d; font-style:italic; font-size:16px;">Bạn đã hoàn thành tất cả chi tiêu được lên kế hoạch cho hôm nay.</p>
-                                       </div>`;
-            } else {
-                container.innerHTML = html;
-            }
-        }
-        // --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT ---
-        
-    <script>
+<script>
         // CẤU HÌNH API
         const READ_API_BASE = "https://kehoachthuchi-b923b-default-rtdb.asia-southeast1.firebasedatabase.app/usersData/";
         const WRITE_API_BASE = "https://dulieuchitieu-2ca4d-default-rtdb.firebaseio.com/trackingData/";
@@ -821,17 +551,68 @@
             }
         }
 
+        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT ---
+        // Hàm tính ngày hiện tại để chỉ show dữ liệu hôm nay
+        function getCurrentDayKey() {
+            let dayNum = getGMT7Date().getDay(); // 0 là Chủ nhật
+            if(dayNum === 0) return 'chua-nhat';
+            return `thu-${dayNum + 1}`;
+        }
+
+        // Ghi đè hàm cũ để ẩn bảng điều khiển
+        function toggleViewMode() { renderData(); }
+
         let saveTimer; 
-        function updateTaskStatus(day, cat, index, isChecked, rowElement) {
-            if (isChecked) rowElement.classList.add('item-done');
-            else rowElement.classList.remove('item-done');
+        let currentAction = null;
+
+        // Xử lý khi nhấn nút tick
+        function openConfirmModal(day, cat, index, title, price, sl, checkboxEl) {
+            checkboxEl.checked = false; // Ngăn tick liền
+            let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
+            
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-price').value = numericPrice;
+            
+            currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
+            document.getElementById('confirm-modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('confirm-modal').style.display = 'none';
+            currentAction = null;
+        }
+
+        function confirmCheck() {
+            if(!currentAction) return;
+            let {day, cat, index, sl} = currentAction;
+            let actualPrice = document.getElementById('modal-price').value;
 
             if (!trackingData[day]) trackingData[day] = {};
             if (!trackingData[day][cat]) trackingData[day][cat] = {};
-            trackingData[day][cat][index] = isChecked;
 
+            let currentData = trackingData[day][cat][index];
+            if (typeof currentData === 'boolean') {
+                currentData = { count: currentData ? sl : 0, done: currentData, history: [] };
+            } else if (!currentData) {
+                currentData = { count: 0, done: false, history: [] };
+            }
+
+            currentData.count += 1;
+            currentData.history.push(actualPrice);
+
+            if (currentData.count >= sl) {
+                currentData.done = true;
+            }
+
+            trackingData[day][cat][index] = currentData;
+            saveStatusToDB(day, cat, index, currentData);
+
+            closeModal();
+            renderData();
+        }
+
+        function saveStatusToDB(day, cat, index, dataObj) {
             setStatus("Đang lưu...", "orange");
-
             clearTimeout(saveTimer);
             saveTimer = setTimeout(async () => {
                 try {
@@ -839,7 +620,7 @@
                     await fetch(`${WRITE_API_BASE}${currentUserPhone}/${currentWeekKey}.json`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ [path]: isChecked })
+                        body: JSON.stringify({ [path]: dataObj })
                     });
                     setStatus("Đã lưu", "#2ecc71");
                     setTimeout(() => setStatus(""), 2000);
@@ -855,18 +636,6 @@
             el.style.color = color;
         }
 
-        // --- XỬ LÝ GIAO DIỆN HIỂN THỊ ---
-        function toggleViewMode() {
-            const isSingleDay = document.getElementById('view-toggle').checked;
-            const selector = document.getElementById('day-selector');
-            if (isSingleDay) {
-                selector.style.display = 'inline-block';
-            } else {
-                selector.style.display = 'none';
-            }
-            renderData();
-        }
-
         function formatVND(num) {
             if (num === undefined || num === null) return '0 đ';
             return Number(num).toLocaleString('vi-VN') + ' đ';
@@ -876,67 +645,86 @@
             const container = document.getElementById('data-container');
             container.innerHTML = "";
 
-            const isSingleDay = document.getElementById('view-toggle').checked;
-            const selectedDay = document.getElementById('day-selector').value;
+            let currentDayKey = getCurrentDayKey();
+            let dayIndex = daysArr.indexOf(currentDayKey);
+            let dayName = dayIndex !== -1 ? daysName[dayIndex] : "Không xác định";
 
-            let daysToRender = isSingleDay ? [selectedDay] : daysArr;
+            let html = `<div class="day-section">
+                            <div class="day-header">HÔM NAY: ${dayName}</div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th class="col-check">Xong</th>
+                                        <th class="col-nd">Nội dung / Đối tượng</th>
+                                        <th class="col-gia">Giá</th>
+                                        <th class="col-sl">SL Còn</th>
+                                        <th class="col-tong">Thành tiền</th>
+                                    </tr>
+                                </thead>`;
 
-            daysToRender.forEach(dayKey => {
-                let dayIndex = daysArr.indexOf(dayKey);
-                let dayName = daysName[dayIndex];
+            let hasVisibleItems = false;
+
+            catsArr.forEach((catKey, cIdx) => {
+                let items = (weekData && weekData[currentDayKey] && weekData[currentDayKey][catKey]) ? weekData[currentDayKey][catKey] : [];
                 
-                let html = `<div class="day-section">
-                                <div class="day-header">${dayName}</div>
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th class="col-check">Xong</th>
-                                            <th class="col-nd">Nội dung / Đối tượng</th>
-                                            <th class="col-gia">Giá</th>
-                                            <th class="col-sl">SL</th>
-                                            <th class="col-tong">Thành tiền</th>
-                                        </tr>
-                                    </thead>`;
-
-                catsArr.forEach((catKey, cIdx) => {
-                    let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
-                    
-                    if (items.length > 0) {
-                        html += `<tbody>
+                if (items.length > 0) {
+                    let catHtml = `<tbody>
                                     <tr><td colspan="5" class="cat-row">- ${catsName[cIdx]}</td></tr>`;
-                        
-                        items.forEach((item, index) => {
-                            let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
-                            let title = `${cleanNd} ${item.dt ? ' | ' + item.dt : ''}`;
-                            
-                            let isDone = trackingData[dayKey] && trackingData[dayKey][catKey] && trackingData[dayKey][catKey][index];
-                            let rowClass = isDone ? 'item-done' : '';
-                            let checkedAttr = isDone ? 'checked' : '';
-                            let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
+                    let hasItemsInCat = false;
 
-                            html += `<tr class="${rowClass}" id="row-${dayKey}-${catKey}-${index}">
+                    items.forEach((item, index) => {
+                        let tData = trackingData[currentDayKey] && trackingData[currentDayKey][catKey] && trackingData[currentDayKey][catKey][index];
+                        
+                        let isDone = false;
+                        let count = 0;
+                        let totalSl = item.sl || 1;
+
+                        if (tData === true) { isDone = true; count = totalSl; }
+                        else if (tData && typeof tData === 'object') {
+                            isDone = tData.done;
+                            count = tData.count || 0;
+                        }
+
+                        if (isDone) return; // Ẩn mục đã xong
+
+                        hasVisibleItems = true;
+                        hasItemsInCat = true;
+
+                        let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
+                        let title = `${cleanNd} ${item.dt ? ' | ' + item.dt : ''}`;
+                        let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
+                        let remainingSl = totalSl - count;
+                        let safeTitle = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+                        catHtml += `<tr id="row-${currentDayKey}-${catKey}-${index}">
                                         <td class="col-check">
-                                            <input type="checkbox" class="done-check" ${checkedAttr} 
-                                            onchange="updateTaskStatus('${dayKey}', '${catKey}', ${index}, this.checked, this.closest('tr'))">
+                                            <input type="checkbox" class="done-check" 
+                                            onclick="openConfirmModal('${currentDayKey}', '${catKey}', ${index}, '${safeTitle}', '${giaFormatted}', ${totalSl}, this)">
                                         </td>
                                         <td>${title}</td>
                                         <td class="col-gia">${formatVND(giaFormatted)}</td>
-                                        <td class="col-sl">${item.sl || 0}</td>
+                                        <td class="col-sl" style="font-weight:bold; color:#e74c3c;">${remainingSl}</td>
                                         <td class="col-tong">${formatVND(item.total)}</td>
                                     </tr>`;
-                        });
-                        html += `</tbody>`;
-                    }
-                });
-
-                html += `</table></div>`;
-                container.innerHTML += html;
+                    });
+                    
+                    catHtml += `</tbody>`;
+                    if(hasItemsInCat) html += catHtml;
+                }
             });
+
+            html += `</table></div>`;
             
-            if(container.innerHTML === "") {
-                container.innerHTML = `<p style="text-align:center; color:#7f8c8d; font-style:italic;">Không có nội dung chi tiêu nào được lên kế hoạch hoặc dữ liệu đang trống.</p>`;
+            if(!hasVisibleItems) {
+                container.innerHTML = `<div style="text-align:center; padding: 30px;">
+                                        <h2 style="color:#27ae60; margin-bottom: 5px;">Tuyệt vời!</h2>
+                                        <p style="color:#7f8c8d; font-style:italic; font-size:16px;">Bạn đã hoàn thành tất cả chi tiêu được lên kế hoạch cho hôm nay.</p>
+                                       </div>`;
+            } else {
+                container.innerHTML = html;
             }
         }
+        // --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT ---
     </script>
 </body>
 </html>
