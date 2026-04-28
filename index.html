@@ -197,6 +197,33 @@
             color: #f39c12;
             margin-left: 15px;
         }
+        /* --- BẮT ĐẦU CHỈNH SỬA MODULE CSS --- */
+        /* Ẩn phần chọn ngày/tuần cũ */
+        .controls-area {
+            display: none !important;
+        }
+
+        /* Giao diện Modal Xác Nhận */
+        #confirm-modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); z-index: 1000;
+            display: none; justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: #fff; padding: 25px; border-radius: 10px;
+            width: 320px; text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+        .modal-content h3 { margin-top: 0; color: #2980b9; font-size: 20px;}
+        .modal-content input {
+            width: 100%; padding: 12px; margin: 15px 0;
+            border: 2px solid #ddd; border-radius: 6px; box-sizing: border-box;
+            font-size: 16px; font-weight: bold; text-align: center; color: #c0392b;
+        }
+        .modal-btns { display: flex; justify-content: space-between; gap: 10px; }
+        .btn-confirm { background: #27ae60; color: white; border: none; padding: 12px; border-radius: 6px; flex: 1; cursor: pointer; font-weight: bold;}
+        .btn-cancel { background: #e74c3c; color: white; border: none; padding: 12px; border-radius: 6px; flex: 1; cursor: pointer; font-weight: bold;}
+        /* --- KẾT THÚC CHỈNH SỬA MODULE CSS --- */
     </style>
 </head>
 <body>
@@ -269,6 +296,198 @@
 
             <div id="data-container"></div>
         </div>
+        <div id="confirm-modal">
+            <div class="modal-content">
+                <h3>XÁC NHẬN CHI TIÊU</h3>
+                <p id="modal-title" style="font-weight: bold; color: #e67e22; font-size: 18px; margin-bottom: 20px; word-wrap: break-word;"></p>
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Số tiền thực chi (VNĐ):</label>
+                <input type="number" id="modal-price" placeholder="Nhập số tiền chi...">
+                <div class="modal-btns">
+                    <button class="btn-cancel" onclick="closeModal()">Hủy</button>
+                    <button class="btn-confirm" onclick="confirmCheck()">Hoàn Thành</button>
+                </div>
+            </div>
+        </div>
+        ```
+
+### BƯỚC 3: Cập nhật JavaScript (Logic xử lý mới)
+Bạn tìm trong phần `<script>`, bôi đen từ dòng `let saveTimer;` cho đến hết hàm `renderData()`, sau đó **xóa và thay thế bằng toàn bộ đoạn code dưới đây**.
+
+```javascript
+        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT ---
+
+        // Hàm tính ngày hiện tại để chỉ show dữ liệu hôm nay
+        function getCurrentDayKey() {
+            let dayNum = getGMT7Date().getDay(); // 0 là Chủ nhật
+            if(dayNum === 0) return 'chua-nhat';
+            return `thu-${dayNum + 1}`;
+        }
+
+        // Ghi đè hàm cũ (để không bị lỗi console nếu HTML cũ vẫn gọi)
+        function toggleViewMode() { renderData(); }
+        function updateTaskStatus() { /* Đã vô hiệu hóa để dùng logic Modal */ }
+
+        let saveTimer; 
+        let currentAction = null;
+
+        // Xử lý khi nhấn nút tick
+        function openConfirmModal(day, cat, index, title, price, sl, checkboxEl) {
+            // Ngăn checkbox hiện dấu tick ngay lập tức
+            checkboxEl.checked = false; 
+            
+            let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
+            
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-price').value = numericPrice;
+            
+            currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
+            document.getElementById('confirm-modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('confirm-modal').style.display = 'none';
+            currentAction = null;
+        }
+
+        function confirmCheck() {
+            if(!currentAction) return;
+            let {day, cat, index, sl} = currentAction;
+            let actualPrice = document.getElementById('modal-price').value;
+
+            if (!trackingData[day]) trackingData[day] = {};
+            if (!trackingData[day][cat]) trackingData[day][cat] = {};
+
+            // Xử lý cơ sở dữ liệu: Dùng Object để lưu số lần thay vì Boolean
+            let currentData = trackingData[day][cat][index];
+            if (typeof currentData === 'boolean') {
+                currentData = { count: currentData ? sl : 0, done: currentData, history: [] };
+            } else if (!currentData) {
+                currentData = { count: 0, done: false, history: [] };
+            }
+
+            // Tăng số lần chi và lưu số tiền
+            currentData.count += 1;
+            currentData.history.push(actualPrice);
+
+            // Kiểm tra nếu đã đủ số lượng -> hoàn thành
+            if (currentData.count >= sl) {
+                currentData.done = true;
+            }
+
+            trackingData[day][cat][index] = currentData;
+            saveStatusToDB(day, cat, index, currentData);
+
+            closeModal();
+            renderData(); // Render lại để mục đã xong biến mất khỏi màn hình
+        }
+
+        function saveStatusToDB(day, cat, index, dataObj) {
+            setStatus("Đang lưu...", "orange");
+            clearTimeout(saveTimer);
+            saveTimer = setTimeout(async () => {
+                try {
+                    let path = `${day}/${cat}/${index}`;
+                    await fetch(`${WRITE_API_BASE}${currentUserPhone}/${currentWeekKey}.json`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ [path]: dataObj })
+                    });
+                    setStatus("Đã lưu", "#2ecc71");
+                    setTimeout(() => setStatus(""), 2000);
+                } catch (e) {
+                    setStatus("Lỗi lưu DB", "red");
+                }
+            }, 1000);
+        }
+
+        // Render lại dữ liệu
+        function renderData() {
+            const container = document.getElementById('data-container');
+            container.innerHTML = "";
+
+            let currentDayKey = getCurrentDayKey();
+            let dayIndex = daysArr.indexOf(currentDayKey);
+            let dayName = dayIndex !== -1 ? daysName[dayIndex] : "Không xác định";
+
+            let html = `<div class="day-section">
+                            <div class="day-header">HÔM NAY: ${dayName}</div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th class="col-check">Xong</th>
+                                        <th class="col-nd">Nội dung / Đối tượng</th>
+                                        <th class="col-gia">Giá</th>
+                                        <th class="col-sl">SL Còn</th>
+                                        <th class="col-tong">Thành tiền</th>
+                                    </tr>
+                                </thead>`;
+
+            let hasVisibleItems = false;
+
+            catsArr.forEach((catKey, cIdx) => {
+                let items = (weekData && weekData[currentDayKey] && weekData[currentDayKey][catKey]) ? weekData[currentDayKey][catKey] : [];
+                
+                if (items.length > 0) {
+                    let catHtml = `<tbody>
+                                    <tr><td colspan="5" class="cat-row">- ${catsName[cIdx]}</td></tr>`;
+                    let hasItemsInCat = false;
+
+                    items.forEach((item, index) => {
+                        let tData = trackingData[currentDayKey] && trackingData[currentDayKey][catKey] && trackingData[currentDayKey][catKey][index];
+                        
+                        let isDone = false;
+                        let count = 0;
+                        let totalSl = item.sl || 1;
+
+                        if (tData === true) { isDone = true; count = totalSl; }
+                        else if (tData && typeof tData === 'object') {
+                            isDone = tData.done;
+                            count = tData.count || 0;
+                        }
+
+                        // QUAN TRỌNG: Ẩn đi nếu đã hoàn thành đủ số lượng
+                        if (isDone) return; 
+
+                        hasVisibleItems = true;
+                        hasItemsInCat = true;
+
+                        let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
+                        let title = `${cleanNd} ${item.dt ? ' | ' + item.dt : ''}`;
+                        let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
+                        let remainingSl = totalSl - count;
+
+                        // Xử lý chuỗi để tránh lỗi khi truyền vào hàm
+                        let safeTitle = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+                        catHtml += `<tr id="row-${currentDayKey}-${catKey}-${index}">
+                                        <td class="col-check">
+                                            <input type="checkbox" class="done-check" 
+                                            onclick="openConfirmModal('${currentDayKey}', '${catKey}', ${index}, '${safeTitle}', '${giaFormatted}', ${totalSl}, this)">
+                                        </td>
+                                        <td>${title}</td>
+                                        <td class="col-gia">${formatVND(giaFormatted)}</td>
+                                        <td class="col-sl" style="font-weight:bold; color:#e74c3c;">${remainingSl}</td>
+                                        <td class="col-tong">${formatVND(item.total)}</td>
+                                    </tr>`;
+                    });
+                    
+                    catHtml += `</tbody>`;
+                    if(hasItemsInCat) html += catHtml;
+                }
+            });
+
+            html += `</table></div>`;
+            
+            if(!hasVisibleItems) {
+                container.innerHTML = `<div style="text-align:center; padding: 30px;">
+                                        <h2 style="color:#27ae60; margin-bottom: 5px;">Tuyệt vời!</h2>
+                                        <p style="color:#7f8c8d; font-style:italic; font-size:16px;">Bạn đã hoàn thành tất cả chi tiêu được lên kế hoạch cho hôm nay.</p>
+                                       </div>`;
+            } else {
+                container.innerHTML = html;
+            }
+        }
+        // --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT ---
     </div>
 
     <script>
