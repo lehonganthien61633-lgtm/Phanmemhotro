@@ -275,8 +275,9 @@
 
         <div class="container">
             <div class="tab-container">
-                <button id="tab-pending" class="tab-btn active" onclick="switchView('pending')">CẦN CHI TIÊU</button>
-                <button id="tab-history" class="tab-btn" onclick="switchView('history')">LỊCH SỬ ĐÃ TICK</button>
+                <button id="tab-pending" class="tab-btn active" onclick="switchView('pending')">CẦN CHI</button>
+                <button id="tab-history" class="tab-btn" onclick="switchView('history')">LỊCH SỬ</button>
+                <button id="tab-summary" class="tab-btn" onclick="switchView('summary')">TỔNG KẾT</button>
             </div>
             
             <h3 style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; line-height: 1.5;">
@@ -468,13 +469,16 @@
 
         // Logic UI (Tab & Modal)
         let currentViewMode = 'pending'; 
+        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT 1 ---
         function switchView(mode) {
             currentViewMode = mode;
             document.getElementById('tab-pending').classList.toggle('active', mode === 'pending');
             document.getElementById('tab-history').classList.toggle('active', mode === 'history');
+            let tabSum = document.getElementById('tab-summary');
+            if(tabSum) tabSum.classList.toggle('active', mode === 'summary');
             renderData();
         }
-
+// --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT 1 ---
         function getCurrentDayKey() {
             let dayNum = getGMT7Date().getDay();
             return dayNum === 0 ? 'chua-nhat' : `thu-${dayNum + 1}`;
@@ -574,14 +578,79 @@
             return Number(num).toLocaleString('vi-VN') + ' đ';
         }
 
+        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT 2 ---
         function renderData() {
             const container = document.getElementById('data-container');
             container.innerHTML = "";
 
             let currentDayKey = getCurrentDayKey();
             let todayIndex = daysArr.indexOf(currentDayKey);
+
+            // GIAO DIỆN TỔNG KẾT (SITE MỚI)
+            if (currentViewMode === 'summary') {
+                let expectedTotals = Array(catsArr.length).fill(0);
+                let actualTotals = Array(catsArr.length).fill(0);
+                let daysToCalc = daysArr.slice(0, todayIndex + 1); // Tính từ đầu tuần đến hôm nay
+
+                // Tính toán dữ liệu
+                daysToCalc.forEach(dayKey => {
+                    catsArr.forEach((catKey, cIdx) => {
+                        let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
+                        items.forEach((item, index) => {
+                            expectedTotals[cIdx] += Number(item.total || 0);
+
+                            let tData = trackingData[dayKey] && trackingData[dayKey][catKey] && trackingData[dayKey][catKey][index];
+                            if (tData === true) {
+                                actualTotals[cIdx] += Number(item.total || 0);
+                            } else if (tData && typeof tData === 'object') {
+                                if (tData.history && tData.history.length > 0) {
+                                    let sumActual = tData.history.reduce((a, b) => a + Number(b || 0), 0);
+                                    actualTotals[cIdx] += sumActual;
+                                }
+                            }
+                        });
+                    });
+                });
+
+                // Vẽ bảng Tổng kết
+                let summaryHtml = `<div class="day-section" style="border: none;">
+                    <div style="overflow-x: auto;">
+                    <table style="width: 100%; text-align: center; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                        <thead>
+                            <tr>`;
+                
+                catsArr.forEach((catKey, idx) => {
+                    summaryHtml += `<th style="padding: 12px 5px; border: 1px solid #000; background-color: #f1f2f6; font-weight: bold; min-width: 100px;">${catsName[idx]}</th>`;
+                });
+                summaryHtml += `</tr></thead><tbody>`;
+
+                // Hàng 1: Dự kiến
+                summaryHtml += `<tr>`;
+                expectedTotals.forEach(val => {
+                    summaryHtml += `<td style="padding: 15px 5px; border: 1px solid #000; color: #34495e;">
+                                        <div style="font-size:12px; color:#7f8c8d; margin-bottom:5px;">Dự kiến</div>
+                                        <strong>${formatVND(val)}</strong>
+                                    </td>`;
+                });
+                summaryHtml += `</tr>`;
+
+                // Hàng 2: Thực chi
+                summaryHtml += `<tr>`;
+                actualTotals.forEach(val => {
+                    summaryHtml += `<td style="padding: 15px 5px; border: 1px solid #000; color: #27ae60;">
+                                        <div style="font-size:12px; color:#7f8c8d; margin-bottom:5px;">Thực chi</div>
+                                        <strong>${formatVND(val)}</strong>
+                                    </td>`;
+                });
+                summaryHtml += `</tr>`;
+
+                summaryHtml += `</tbody></table></div></div>`;
+                container.innerHTML = summaryHtml;
+                return; // Dừng hàm tại đây nếu đang ở Tab Tổng kết
+            }
+
+            // GIAO DIỆN CẦN CHI & LỊCH SỬ (Giữ nguyên logic cũ)
             let daysToRender = currentViewMode === 'pending' ? daysArr.slice(0, todayIndex + 1) : daysArr;
-            
             let hasAnyVisibleItems = false;
             let finalHtml = "";
 
@@ -629,7 +698,6 @@
                             let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
                             let itemDt = item.dt ? item.dt : '';
 
-                            // Ghi đè Nội dung/Đối tượng bằng dữ liệu đã chỉnh sửa nếu có
                             if (tData && typeof tData === 'object') {
                                 if (tData.customNd) cleanNd = tData.customNd;
                                 if (tData.customDt) itemDt = tData.customDt;
@@ -649,7 +717,6 @@
                                 checkHtml = `<input type="checkbox" class="done-check" onclick="openConfirmModal('${dayKey}', '${catKey}', ${index}, '${safeNd}', '${safeDt}', '${giaFormatted}', ${totalSl}, this)">`;
                             } else {
                                 displaySl = totalSl; rowCssClass = 'item-done'; 
-                                // Checkbox có thể bấm để hoàn tác
                                 checkHtml = `<input type="checkbox" class="done-check" checked onclick="undoCheck('${dayKey}', '${catKey}', ${index})">`;
                                 if (tData && tData.history && tData.history.length > 0) {
                                     let sumActual = tData.history.reduce((a, b) => a + Number(b || 0), 0);
@@ -686,6 +753,7 @@
                 container.innerHTML = finalHtml;
             }
         }
+// --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT 2 ---
     </script>
 </body>
 </html>
