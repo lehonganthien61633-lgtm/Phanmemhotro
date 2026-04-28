@@ -592,28 +592,72 @@
                 let actualTotals = Array(catsArr.length).fill(0);
                 let daysToCalc = daysArr.slice(0, todayIndex + 1); // Tính từ đầu tuần đến hôm nay
 
+                let totalExpected = 0;
+                let totalActual = 0;
+
                 // Tính toán dữ liệu
                 daysToCalc.forEach(dayKey => {
                     catsArr.forEach((catKey, cIdx) => {
                         let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
                         items.forEach((item, index) => {
-                            expectedTotals[cIdx] += Number(item.total || 0);
+                            let itemTotal = Number(item.total || 0);
+                            expectedTotals[cIdx] += itemTotal;
+                            totalExpected += itemTotal;
 
                             let tData = trackingData[dayKey] && trackingData[dayKey][catKey] && trackingData[dayKey][catKey][index];
                             if (tData === true) {
-                                actualTotals[cIdx] += Number(item.total || 0);
+                                actualTotals[cIdx] += itemTotal;
+                                totalActual += itemTotal;
                             } else if (tData && typeof tData === 'object') {
                                 if (tData.history && tData.history.length > 0) {
                                     let sumActual = tData.history.reduce((a, b) => a + Number(b || 0), 0);
                                     actualTotals[cIdx] += sumActual;
+                                    totalActual += sumActual;
                                 }
                             }
                         });
                     });
                 });
 
+                // Tính chênh lệch và tiến độ
+                let difference = totalExpected - totalActual;
+                let diffColor = difference >= 0 ? '#27ae60' : '#e74c3c';
+                let diffText = difference >= 0 ? `+${formatVND(difference)} (Dư)` : `${formatVND(difference)} (Vượt)`;
+                
+                let progressPercent = totalExpected > 0 ? (totalActual / totalExpected) * 100 : 0;
+                let displayPercent = Math.min(progressPercent, 100);
+                let progressColor = progressPercent > 100 ? '#e74c3c' : (progressPercent > 80 ? '#f39c12' : '#27ae60');
+
+                // Vẽ phần Thống kê tổng quan & Thanh tiến độ
+                let summaryHtml = `
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 20px; font-weight: bold; font-size: 14px; gap: 10px; text-align: center;">
+                        <div style="background: #ecf0f1; padding: 10px; border-radius: 8px; flex: 1; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                            <div style="color: #7f8c8d; font-size: 11px; margin-bottom: 5px;">TỔNG DỰ CHI</div>
+                            <div style="color: #3498db;">${formatVND(totalExpected)}</div>
+                        </div>
+                        <div style="background: #ecf0f1; padding: 10px; border-radius: 8px; flex: 1; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                            <div style="color: #7f8c8d; font-size: 11px; margin-bottom: 5px;">TỔNG THỰC CHI</div>
+                            <div style="color: #27ae60;">${formatVND(totalActual)}</div>
+                        </div>
+                        <div style="background: #ecf0f1; padding: 10px; border-radius: 8px; flex: 1; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                            <div style="color: #7f8c8d; font-size: 11px; margin-bottom: 5px;">CHÊNH LỆCH</div>
+                            <div style="color: ${diffColor};">${diffText}</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 30px;">
+                        <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; margin-bottom: 8px;">
+                            <span style="color: #34495e;">Tiến độ tiêu tiền</span>
+                            <span style="color: ${progressColor};">${progressPercent.toFixed(1)}%</span>
+                        </div>
+                        <div style="width: 100%; background-color: #e9ecef; border-radius: 10px; height: 18px; overflow: hidden; position: relative;">
+                            <div style="height: 100%; background-color: ${progressColor}; width: ${displayPercent}%; transition: width 0.5s ease-in-out;"></div>
+                        </div>
+                    </div>
+                `;
+
                 // Vẽ bảng Tổng kết
-                let summaryHtml = `<div class="day-section" style="border: none;">
+                summaryHtml += `<div class="day-section" style="border: none;">
                     <div style="overflow-x: auto;">
                     <table style="width: 100%; text-align: center; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
                         <thead>
