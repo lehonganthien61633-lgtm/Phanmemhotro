@@ -290,9 +290,16 @@
         <div id="confirm-modal">
             <div class="modal-content">
                 <h3>XÁC NHẬN CHI TIÊU</h3>
-                <p id="modal-title" style="font-weight: bold; color: #e67e22; font-size: 18px; margin-bottom: 20px; word-wrap: break-word;"></p>
-                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Số tiền thực chi (VNĐ):</label>
+                
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Nội dung:</label>
+                <input type="text" id="modal-nd" placeholder="Nhập nội dung...">
+                
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Đối tượng:</label>
+                <input type="text" id="modal-dt" placeholder="Nhập đối tượng...">
+
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Số tiền thực chi (VNĐ):</label>
                 <input type="number" id="modal-price" placeholder="Nhập số tiền chi...">
+                
                 <div class="modal-btns">
                     <button class="btn-cancel" onclick="closeModal()">Hủy</button>
                     <button class="btn-confirm" onclick="confirmCheck()">Hoàn Thành</button>
@@ -473,13 +480,17 @@
             return dayNum === 0 ? 'chua-nhat' : `thu-${dayNum + 1}`;
         }
 
+        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT ---
         let saveTimer; let currentAction = null;
 
-        function openConfirmModal(day, cat, index, title, price, sl, checkboxEl) {
+        function openConfirmModal(day, cat, index, nd, dt, price, sl, checkboxEl) {
             checkboxEl.checked = false; 
             let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
-            document.getElementById('modal-title').innerText = title;
+            
+            document.getElementById('modal-nd').value = nd || '';
+            document.getElementById('modal-dt').value = dt || '';
             document.getElementById('modal-price').value = numericPrice;
+            
             currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
             document.getElementById('confirm-modal').style.display = 'flex';
         }
@@ -490,24 +501,51 @@
             if(!currentAction) return;
             let {day, cat, index, sl} = currentAction;
             let actualPrice = document.getElementById('modal-price').value;
+            let customNd = document.getElementById('modal-nd').value.trim();
+            let customDt = document.getElementById('modal-dt').value.trim();
 
             if (!trackingData[day]) trackingData[day] = {};
             if (!trackingData[day][cat]) trackingData[day][cat] = {};
 
             let currentData = trackingData[day][cat][index];
             if (typeof currentData === 'boolean') {
-                currentData = { count: currentData ? sl : 0, done: currentData, history: [] };
+                currentData = { count: currentData ? sl : 0, done: currentData, history: [], customNd: '', customDt: '' };
             } else if (!currentData) {
-                currentData = { count: 0, done: false, history: [] };
+                currentData = { count: 0, done: false, history: [], customNd: '', customDt: '' };
             }
 
             currentData.count += 1;
             currentData.history.push(actualPrice);
+            currentData.customNd = customNd;
+            currentData.customDt = customDt;
+
             if (currentData.count >= sl) currentData.done = true;
 
             trackingData[day][cat][index] = currentData;
             saveStatusToDB(day, cat, index, currentData);
             closeModal(); renderData();
+        }
+
+        function undoCheck(day, cat, index) {
+            if (!confirm("Bạn có muốn hoàn tác khoản chi này?")) return;
+            
+            if (trackingData[day] && trackingData[day][cat]) {
+                let currentData = trackingData[day][cat][index];
+                if (currentData === true) {
+                    trackingData[day][cat][index] = null; 
+                    currentData = null;
+                } else if (typeof currentData === 'object') {
+                    currentData.count = Math.max(0, currentData.count - 1);
+                    currentData.history.pop();
+                    currentData.done = false; 
+                    if (currentData.count === 0) {
+                        trackingData[day][cat][index] = null;
+                        currentData = null;
+                    }
+                }
+                saveStatusToDB(day, cat, index, currentData);
+                renderData();
+            }
         }
 
         function saveStatusToDB(day, cat, index, dataObj) {
@@ -536,7 +574,6 @@
             return Number(num).toLocaleString('vi-VN') + ' đ';
         }
 
-        // Core Render (Pending & History)
         function renderData() {
             const container = document.getElementById('data-container');
             container.innerHTML = "";
@@ -590,9 +627,18 @@
                             hasVisibleItemsInDay = true; hasItemsInCat = true; hasAnyVisibleItems = true;
 
                             let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
-                            let title = `${cleanNd} ${item.dt ? ' | ' + item.dt : ''}`;
+                            let itemDt = item.dt ? item.dt : '';
+
+                            // Ghi đè Nội dung/Đối tượng bằng dữ liệu đã chỉnh sửa nếu có
+                            if (tData && typeof tData === 'object') {
+                                if (tData.customNd) cleanNd = tData.customNd;
+                                if (tData.customDt) itemDt = tData.customDt;
+                            }
+
+                            let title = `${cleanNd} ${itemDt ? ' | ' + itemDt : ''}`;
                             let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
-                            let safeTitle = title.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                            let safeNd = cleanNd.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                            let safeDt = itemDt.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
                             let checkHtml = ''; let finalPriceStr = ''; let displaySl = ''; let rowCssClass = '';
 
@@ -600,10 +646,11 @@
                                 let remainingSl = totalSl - count;
                                 displaySl = `<span style="color:#e74c3c;">${remainingSl}</span>`;
                                 finalPriceStr = formatVND(item.total);
-                                checkHtml = `<input type="checkbox" class="done-check" onclick="openConfirmModal('${dayKey}', '${catKey}', ${index}, '${safeTitle}', '${giaFormatted}', ${totalSl}, this)">`;
+                                checkHtml = `<input type="checkbox" class="done-check" onclick="openConfirmModal('${dayKey}', '${catKey}', ${index}, '${safeNd}', '${safeDt}', '${giaFormatted}', ${totalSl}, this)">`;
                             } else {
                                 displaySl = totalSl; rowCssClass = 'item-done'; 
-                                checkHtml = `<input type="checkbox" class="done-check" checked disabled>`;
+                                // Checkbox có thể bấm để hoàn tác
+                                checkHtml = `<input type="checkbox" class="done-check" checked onclick="undoCheck('${dayKey}', '${catKey}', ${index})">`;
                                 if (tData && tData.history && tData.history.length > 0) {
                                     let sumActual = tData.history.reduce((a, b) => a + Number(b || 0), 0);
                                     finalPriceStr = `<span style="color:#27ae60; font-weight:bold;">${formatVND(sumActual)}</span>`;
