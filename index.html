@@ -291,22 +291,48 @@
         <div id="confirm-modal">
             <div class="modal-content">
                 <h3>XÁC NHẬN CHI TIÊU</h3>
-                
                 <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Nội dung:</label>
                 <input type="text" id="modal-nd" placeholder="Nhập nội dung...">
-                
                 <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Đối tượng:</label>
                 <input type="text" id="modal-dt" placeholder="Nhập đối tượng...">
-
                 <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Số tiền thực chi (VNĐ):</label>
                 <input type="number" id="modal-price" placeholder="Nhập số tiền chi...">
-                
                 <div class="modal-btns">
                     <button class="btn-cancel" onclick="closeModal()">Hủy</button>
                     <button class="btn-confirm" onclick="confirmCheck()">Hoàn Thành</button>
                 </div>
             </div>
         </div>
+
+        <div id="add-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 1000; display: none; justify-content: center; align-items: center;">
+            <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
+                <h3>THÊM KHOẢN CHI</h3>
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Ngày:</label>
+                <select id="add-day" style="width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #ddd; border-radius: 6px; font-size: 16px;"></select>
+                
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Danh mục:</label>
+                <select id="add-cat" style="width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #ddd; border-radius: 6px; font-size: 16px;"></select>
+                
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Nội dung:</label>
+                <input type="text" id="add-nd" placeholder="Nhập nội dung...">
+                
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Đối tượng (Tùy chọn):</label>
+                <input type="text" id="add-dt" placeholder="Nhập đối tượng...">
+
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Giá (VNĐ):</label>
+                <input type="number" id="add-price" placeholder="Ví dụ: 10000">
+                
+                <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Số lượng:</label>
+                <input type="number" id="add-sl" value="1" min="1">
+                
+                <div class="modal-btns">
+                    <button class="btn-cancel" onclick="closeAddModal()">Hủy</button>
+                    <button class="btn-confirm" onclick="confirmAddItem()">Thêm mới</button>
+                </div>
+            </div>
+        </div>
+
+        <button id="fab-add" onclick="openAddModal()" style="position: fixed; bottom: 30px; right: 30px; width: 60px; height: 60px; border-radius: 50%; background: #e74c3c; color: white; font-size: 35px; font-weight: bold; border: none; box-shadow: 0 4px 10px rgba(0,0,0,0.3); cursor: pointer; display: none; z-index: 100; align-items: center; justify-content: center; line-height: 1;">+</button>
 </div> <script>
         // CẤU HÌNH API
         const READ_API_BASE = "https://kehoachthuchi-b923b-default-rtdb.asia-southeast1.firebasedatabase.app/usersData/";
@@ -467,35 +493,95 @@
             } catch (err) { setStatus("Lỗi đồng bộ", "red"); }
         }
 
+        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT ---
         // Logic UI (Tab & Modal)
         let currentViewMode = 'pending'; 
-        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT 1 ---
         function switchView(mode) {
             currentViewMode = mode;
             document.getElementById('tab-pending').classList.toggle('active', mode === 'pending');
             document.getElementById('tab-history').classList.toggle('active', mode === 'history');
             let tabSum = document.getElementById('tab-summary');
             if(tabSum) tabSum.classList.toggle('active', mode === 'summary');
+            
+            let fab = document.getElementById('fab-add');
+            if (fab) fab.style.display = (mode === 'pending') ? 'flex' : 'none';
+            
             renderData();
         }
-// --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT 1 ---
+
         function getCurrentDayKey() {
             let dayNum = getGMT7Date().getDay();
             return dayNum === 0 ? 'chua-nhat' : `thu-${dayNum + 1}`;
         }
 
-        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT ---
         let saveTimer; let currentAction = null;
-        let editingConflict = null; // Biến lưu trạng thái đang chỉnh sửa xung đột
+        let editingConflict = null; 
 
+        // --- CÁC HÀM XỬ LÝ THÊM KHOẢN CHI (MỚI) ---
+        function openAddModal() {
+            let daySel = document.getElementById('add-day');
+            let catSel = document.getElementById('add-cat');
+            if (daySel.options.length === 0) {
+                daysArr.forEach((d, i) => daySel.add(new Option(daysName[i], d)));
+                catsArr.forEach((c, i) => catSel.add(new Option(catsName[i], c)));
+            }
+            daySel.value = getCurrentDayKey();
+            document.getElementById('add-nd').value = '';
+            document.getElementById('add-dt').value = '';
+            document.getElementById('add-price').value = '';
+            document.getElementById('add-sl').value = '1';
+            
+            document.getElementById('add-modal').style.display = 'flex';
+        }
+
+        function closeAddModal() { document.getElementById('add-modal').style.display = 'none'; }
+
+        function confirmAddItem() {
+            let day = document.getElementById('add-day').value;
+            let cat = document.getElementById('add-cat').value;
+            let nd = document.getElementById('add-nd').value.trim();
+            let dt = document.getElementById('add-dt').value.trim();
+            let price = Number(document.getElementById('add-price').value || 0);
+            let sl = parseInt(document.getElementById('add-sl').value || 1);
+
+            if(!nd || price <= 0) return alert("Vui lòng nhập Nội dung và Giá hợp lệ!");
+
+            let total = price * sl;
+            let plannedLen = (weekData && weekData[day] && weekData[day][cat]) ? weekData[day][cat].length : 0;
+            let nextIndex = plannedLen;
+            if (trackingData[day] && trackingData[day][cat]) {
+                let maxKey = Math.max(...Object.keys(trackingData[day][cat]).map(Number));
+                if (maxKey >= nextIndex) nextIndex = maxKey + 1;
+            }
+
+            let newItem = {
+                isExtra: true, nd: nd, dt: dt, gia: price.toString(), sl: sl, total: total,
+                count: 0, done: false, history: [], orig: { nd: nd, dt: dt }
+            };
+
+            if (!trackingData[day]) trackingData[day] = {};
+            if (!trackingData[day][cat]) trackingData[day][cat] = {};
+            
+            trackingData[day][cat][nextIndex] = newItem;
+            saveStatusToDB(day, cat, nextIndex, newItem);
+            
+            closeAddModal(); renderData();
+        }
+
+        function deleteExtraItem(day, cat, index) {
+            if(!confirm("Xóa khoản chi thủ công này?")) return;
+            trackingData[day][cat][index] = null;
+            saveStatusToDB(day, cat, index, null);
+            renderData();
+        }
+
+        // --- CÁC HÀM XỬ LÝ TICK & MODAL CŨ ---
         function openConfirmModal(day, cat, index, nd, dt, price, sl, checkboxEl) {
             checkboxEl.checked = false; 
             let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
-            
             document.getElementById('modal-nd').value = nd || '';
             document.getElementById('modal-dt').value = dt || '';
             document.getElementById('modal-price').value = numericPrice;
-            
             currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
             document.getElementById('confirm-modal').style.display = 'flex';
         }
@@ -513,7 +599,7 @@
             if (!trackingData[day][cat]) trackingData[day][cat] = {};
 
             let currentData = trackingData[day][cat][index];
-            let plannedItem = weekData[day][cat][index] || {}; // Lấy dữ liệu kế hoạch gốc
+            let plannedItem = (weekData[day] && weekData[day][cat] && weekData[day][cat][index]) ? weekData[day][cat][index] : {};
 
             if (typeof currentData === 'boolean') {
                 currentData = { count: currentData ? sl : 0, done: currentData, history: [], customNd: '', customDt: '' };
@@ -521,16 +607,12 @@
                 currentData = { count: 0, done: false, history: [], customNd: '', customDt: '' };
             }
 
-            // LƯU LẠI BẢN GỐC ĐỂ PHÁT HIỆN THAY ĐỔI SAU NÀY
-            if (!currentData.orig) {
-                currentData.orig = { nd: plannedItem.nd, dt: plannedItem.dt };
-            }
+            if (!currentData.orig) currentData.orig = { nd: plannedItem.nd || customNd, dt: plannedItem.dt || customDt };
 
             currentData.count += 1;
             currentData.history.push(actualPrice);
             currentData.customNd = customNd;
             currentData.customDt = customDt;
-
             if (currentData.count >= sl) currentData.done = true;
 
             trackingData[day][cat][index] = currentData;
@@ -538,12 +620,10 @@
             closeModal(); renderData();
         }
 
-        // CHỨC NĂNG XỬ LÝ XUNG ĐỘT (KHI CÓ SỰ THAY ĐỔI)
         function resolveConflict(action, day, cat, index) {
             if (action === 'keep') {
                 let plannedItem = weekData[day][cat][index] || {};
                 if (trackingData[day] && trackingData[day][cat] && trackingData[day][cat][index]) {
-                    // Cập nhật lại bản gốc để khớp với DB mới, chấm dứt cảnh báo
                     trackingData[day][cat][index].orig = { nd: plannedItem.nd, dt: plannedItem.dt };
                     saveStatusToDB(day, cat, index, trackingData[day][cat][index]);
                 }
@@ -561,36 +641,33 @@
                 let newNd = document.getElementById(`edit-nd-${day}${cat}${index}`).value.trim();
                 let newDt = document.getElementById(`edit-dt-${day}${cat}${index}`).value.trim();
                 let plannedItem = weekData[day][cat][index] || {};
-
                 let tData = trackingData[day][cat][index];
-                tData.customNd = newNd;
-                tData.customDt = newDt;
-                tData.orig = { nd: plannedItem.nd, dt: plannedItem.dt }; // Cập nhật lại gốc
-                saveStatusToDB(day, cat, index, tData);
                 
-                editingConflict = null;
-                renderData();
+                tData.customNd = newNd; tData.customDt = newDt;
+                tData.orig = { nd: plannedItem.nd, dt: plannedItem.dt }; 
+                saveStatusToDB(day, cat, index, tData);
+                editingConflict = null; renderData();
             } else if (action === 'cancelEdit') {
-                editingConflict = null;
-                renderData();
+                editingConflict = null; renderData();
             }
         }
 
         function undoCheck(day, cat, index) {
             if (!confirm("Bạn có muốn hoàn tác (bỏ tích) khoản chi này?")) return;
-            
             if (trackingData[day] && trackingData[day][cat]) {
                 let currentData = trackingData[day][cat][index];
                 if (currentData === true) {
-                    trackingData[day][cat][index] = null; 
-                    currentData = null;
+                    trackingData[day][cat][index] = null; currentData = null;
                 } else if (typeof currentData === 'object') {
                     currentData.count = Math.max(0, currentData.count - 1);
                     currentData.history.pop();
                     currentData.done = false; 
                     if (currentData.count === 0) {
-                        trackingData[day][cat][index] = null;
-                        currentData = null;
+                        if (currentData.isExtra) {
+                            currentData.history = []; // Reset but keep definition
+                        } else {
+                            trackingData[day][cat][index] = null; currentData = null;
+                        }
                     }
                 }
                 saveStatusToDB(day, cat, index, currentData);
@@ -599,14 +676,12 @@
         }
 
         function saveStatusToDB(day, cat, index, dataObj) {
-            setStatus("Đang lưu...", "orange");
-            clearTimeout(saveTimer);
+            setStatus("Đang lưu...", "orange"); clearTimeout(saveTimer);
             saveTimer = setTimeout(async () => {
                 try {
                     let path = `${day}/${cat}/${index}`;
                     await fetch(`${WRITE_API_BASE}${currentUserPhone}/${currentWeekKey}.json`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
+                        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ [path]: dataObj })
                     });
                     setStatus("Đã lưu", "#2ecc71"); setTimeout(() => setStatus(""), 2000);
@@ -624,6 +699,21 @@
             return Number(num).toLocaleString('vi-VN') + ' đ';
         }
 
+        // Helper gộp dữ liệu Kế hoạch và Dữ liệu thêm tay
+        function getMergedItems(dayKey, catKey) {
+            let planned = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
+            let keys = Object.keys(planned);
+            if (trackingData[dayKey] && trackingData[dayKey][catKey]) {
+                Object.keys(trackingData[dayKey][catKey]).forEach(k => {
+                    if (trackingData[dayKey][catKey][k] && trackingData[dayKey][catKey][k].isExtra) {
+                        if (!keys.includes(k)) keys.push(k);
+                    }
+                });
+            }
+            keys.sort((a,b) => Number(a) - Number(b));
+            return keys.map(k => ({ item: planned[k] || trackingData[dayKey][catKey][k], index: k }));
+        }
+
         function renderData() {
             const container = document.getElementById('data-container');
             container.innerHTML = "";
@@ -631,18 +721,17 @@
             let currentDayKey = getCurrentDayKey();
             let todayIndex = daysArr.indexOf(currentDayKey);
 
-            // GIAO DIỆN TỔNG KẾT
             if (currentViewMode === 'summary') {
                 let expectedTotals = Array(catsArr.length).fill(0);
                 let actualTotals = Array(catsArr.length).fill(0);
                 let daysToCalc = daysArr.slice(0, todayIndex + 1);
-
                 let totalExpected = 0; let totalActual = 0;
 
                 daysToCalc.forEach(dayKey => {
                     catsArr.forEach((catKey, cIdx) => {
-                        let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
-                        items.forEach((item, index) => {
+                        let merged = getMergedItems(dayKey, catKey);
+                        merged.forEach(obj => {
+                            let item = obj.item; let index = obj.index;
                             let itemTotal = Number(item.total || 0);
                             expectedTotals[cIdx] += itemTotal; totalExpected += itemTotal;
 
@@ -662,7 +751,6 @@
                 let difference = totalExpected - totalActual;
                 let diffColor = difference >= 0 ? '#27ae60' : '#e74c3c';
                 let diffText = difference >= 0 ? `+${formatVND(difference)} (Dư)` : `${formatVND(difference)} (Vượt)`;
-                
                 let progressPercent = totalExpected > 0 ? (totalActual / totalExpected) * 100 : 0;
                 let displayPercent = Math.min(progressPercent, 100);
                 let progressColor = progressPercent > 100 ? '#e74c3c' : (progressPercent > 80 ? '#f39c12' : '#27ae60');
@@ -684,8 +772,7 @@
                     </div>
                     <div style="margin-bottom: 30px;">
                         <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; margin-bottom: 8px;">
-                            <span style="color: #34495e;">Tiến độ tiêu tiền</span>
-                            <span style="color: ${progressColor};">${progressPercent.toFixed(1)}%</span>
+                            <span style="color: #34495e;">Tiến độ tiêu tiền</span><span style="color: ${progressColor};">${progressPercent.toFixed(1)}%</span>
                         </div>
                         <div style="width: 100%; background-color: #e9ecef; border-radius: 10px; height: 18px; overflow: hidden; position: relative;">
                             <div style="height: 100%; background-color: ${progressColor}; width: ${displayPercent}%; transition: width 0.5s ease-in-out;"></div>
@@ -697,25 +784,14 @@
                 
                 catsArr.forEach((catKey, idx) => { summaryHtml += `<th style="padding: 12px 5px; border: 1px solid #000; background-color: #f1f2f6; font-weight: bold; min-width: 100px;">${catsName[idx]}</th>`; });
                 summaryHtml += `</tr></thead><tbody><tr>`;
-                
-                expectedTotals.forEach(val => {
-                    summaryHtml += `<td style="padding: 15px 5px; border: 1px solid #000; color: #34495e;">
-                                        <div style="font-size:12px; color:#7f8c8d; margin-bottom:5px;">Dự kiến</div><strong>${formatVND(val)}</strong>
-                                    </td>`;
-                });
+                expectedTotals.forEach(val => { summaryHtml += `<td style="padding: 15px 5px; border: 1px solid #000; color: #34495e;"><div style="font-size:12px; color:#7f8c8d; margin-bottom:5px;">Dự kiến</div><strong>${formatVND(val)}</strong></td>`; });
                 summaryHtml += `</tr><tr>`;
-                
-                actualTotals.forEach(val => {
-                    summaryHtml += `<td style="padding: 15px 5px; border: 1px solid #000; color: #27ae60;">
-                                        <div style="font-size:12px; color:#7f8c8d; margin-bottom:5px;">Thực chi</div><strong>${formatVND(val)}</strong>
-                                    </td>`;
-                });
+                actualTotals.forEach(val => { summaryHtml += `<td style="padding: 15px 5px; border: 1px solid #000; color: #27ae60;"><div style="font-size:12px; color:#7f8c8d; margin-bottom:5px;">Thực chi</div><strong>${formatVND(val)}</strong></td>`; });
                 summaryHtml += `</tr></tbody></table></div></div>`;
                 
                 container.innerHTML = summaryHtml; return; 
             }
 
-            // GIAO DIỆN CẦN CHI & LỊCH SỬ
             let daysToRender = currentViewMode === 'pending' ? daysArr.slice(0, todayIndex + 1) : daysArr;
             let hasAnyVisibleItems = false; let finalHtml = "";
 
@@ -743,12 +819,13 @@
                 let hasVisibleItemsInDay = false;
 
                 catsArr.forEach((catKey, cIdx) => {
-                    let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
-                    if (items.length > 0) {
+                    let merged = getMergedItems(dayKey, catKey);
+                    if (merged.length > 0) {
                         let catHtml = `<tbody><tr><td colspan="5" class="cat-row">- ${catsName[cIdx]}</td></tr>`;
                         let hasItemsInCat = false;
 
-                        items.forEach((item, index) => {
+                        merged.forEach(obj => {
+                            let item = obj.item; let index = obj.index;
                             let tData = trackingData[dayKey] && trackingData[dayKey][catKey] && trackingData[dayKey][catKey][index];
                             let isDone = false; let count = 0; let totalSl = item.sl || 1;
 
@@ -763,15 +840,12 @@
                             let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
                             let itemDt = item.dt ? item.dt : '';
 
-                            // XÁC ĐỊNH XUNG ĐỘT (Khi dữ liệu gốc thay đổi so với lúc tick)
                             let isConflict = false;
-                            if (tData && typeof tData === 'object' && tData.orig) {
-                                if (tData.orig.nd !== item.nd || tData.orig.dt !== item.dt) {
-                                    isConflict = true;
-                                }
+                            if (tData && typeof tData === 'object' && tData.orig && !item.isExtra) {
+                                if (tData.orig.nd !== item.nd || tData.orig.dt !== item.dt) isConflict = true;
                             }
 
-                            let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
+                            let giaFormatted = item.gia ? item.gia.toString().replace(/,/g, '') : 0;
 
                             if (isConflict) {
                                 let isEditing = editingConflict && editingConflict.day === dayKey && editingConflict.cat === catKey && editingConflict.index === index;
@@ -785,10 +859,9 @@
                                         <input type="text" id="edit-nd-${dayKey}${catKey}${index}" value="${currentCustomNd}" style="width:100%; padding:8px; margin-bottom:8px; border:1px solid #ccc; border-radius:4px; box-sizing: border-box;" placeholder="Nội dung">
                                         <input type="text" id="edit-dt-${dayKey}${catKey}${index}" value="${currentCustomDt}" style="width:100%; padding:8px; margin-bottom:8px; border:1px solid #ccc; border-radius:4px; box-sizing: border-box;" placeholder="Đối tượng">
                                         <div style="display:flex; gap:10px;">
-                                            <button onclick="resolveConflict('saveEdit', '${dayKey}', '${catKey}', ${index})" style="background:#27ae60; color:#fff; border:none; padding:8px 15px; border-radius:4px; cursor:pointer; font-weight:bold;">Lưu thay đổi</button>
+                                            <button onclick="resolveConflict('saveEdit', '${dayKey}', '${catKey}', '${index}')" style="background:#27ae60; color:#fff; border:none; padding:8px 15px; border-radius:4px; cursor:pointer; font-weight:bold;">Lưu thay đổi</button>
                                             <button onclick="resolveConflict('cancelEdit')" style="background:#95a5a6; color:#fff; border:none; padding:8px 15px; border-radius:4px; cursor:pointer; font-weight:bold;">Hủy</button>
-                                        </div>
-                                    `;
+                                        </div>`;
                                 } else {
                                     let oldText = `${tData.orig.nd ? tData.orig.nd.replace(/^Nộp quỹ:\s*/i, '') : ''} ${tData.orig.dt ? '| ' + tData.orig.dt : ''}`;
                                     let newText = `${cleanNd} ${itemDt ? '| ' + itemDt : ''}`;
@@ -797,11 +870,10 @@
                                         <div style="font-size:13px; color:#7f8c8d; text-decoration: line-through; margin-bottom:3px;">Cũ: ${oldText}</div>
                                         <div style="font-size:14px; color:#34495e; margin-bottom:10px;">Mới: <span style="font-weight:bold;">${newText}</span></div>
                                         <div style="display:flex; gap:8px; flex-wrap: wrap;">
-                                            <button onclick="resolveConflict('keep', '${dayKey}', '${catKey}', ${index})" style="background:#2980b9; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Giữ nguyên</button>
-                                            <button onclick="resolveConflict('edit', '${dayKey}', '${catKey}', ${index})" style="background:#f39c12; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Sửa nội dung</button>
-                                            <button onclick="resolveConflict('delete', '${dayKey}', '${catKey}', ${index})" style="background:#e74c3c; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Xóa dữ liệu</button>
-                                        </div>
-                                    `;
+                                            <button onclick="resolveConflict('keep', '${dayKey}', '${catKey}', '${index}')" style="background:#2980b9; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Giữ nguyên</button>
+                                            <button onclick="resolveConflict('edit', '${dayKey}', '${catKey}', '${index}')" style="background:#f39c12; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Sửa nội dung</button>
+                                            <button onclick="resolveConflict('delete', '${dayKey}', '${catKey}', '${index}')" style="background:#e74c3c; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Xóa</button>
+                                        </div>`;
                                 }
                                 
                                 catHtml += `<tr id="row-${dayKey}-${catKey}-${index}" style="background-color: #fadbd8;">
@@ -809,7 +881,6 @@
                                                 <td colspan="4">${conflictContent}</td>
                                             </tr>`;
                             } else {
-                                // HIỂN THỊ HÀNG BÌNH THƯỜNG KHÔNG XUNG ĐỘT
                                 if (tData && typeof tData === 'object') {
                                     if (tData.customNd) cleanNd = tData.customNd;
                                     if (tData.customDt) itemDt = tData.customDt;
@@ -825,10 +896,14 @@
                                     let remainingSl = totalSl - count;
                                     displaySl = `<span style="color:#e74c3c;">${remainingSl}</span>`;
                                     finalPriceStr = formatVND(item.total);
-                                    checkHtml = `<input type="checkbox" class="done-check" onclick="openConfirmModal('${dayKey}', '${catKey}', ${index}, '${safeNd}', '${safeDt}', '${giaFormatted}', ${totalSl}, this)">`;
+                                    checkHtml = `<input type="checkbox" class="done-check" onclick="openConfirmModal('${dayKey}', '${catKey}', '${index}', '${safeNd}', '${safeDt}', '${giaFormatted}', ${totalSl}, this)">`;
+                                    
+                                    if (item.isExtra) {
+                                        checkHtml += `<br><span style="cursor:pointer; color:#e74c3c; font-size:12px; font-weight:bold;" onclick="deleteExtraItem('${dayKey}', '${catKey}', '${index}')">❌ Xóa</span>`;
+                                    }
                                 } else {
                                     displaySl = totalSl; rowCssClass = 'item-done'; 
-                                    checkHtml = `<input type="checkbox" class="done-check" checked onclick="undoCheck('${dayKey}', '${catKey}', ${index})">`;
+                                    checkHtml = `<input type="checkbox" class="done-check" checked onclick="undoCheck('${dayKey}', '${catKey}', '${index}')">`;
                                     if (tData && tData.history && tData.history.length > 0) {
                                         let sumActual = tData.history.reduce((a, b) => a + Number(b || 0), 0);
                                         finalPriceStr = `<span style="color:#27ae60; font-weight:bold;">${formatVND(sumActual)}</span>`;
