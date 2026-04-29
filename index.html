@@ -291,12 +291,16 @@
         <div id="confirm-modal">
             <div class="modal-content">
                 <h3>XÁC NHẬN CHI TIÊU</h3>
+                
                 <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Nội dung:</label>
                 <input type="text" id="modal-nd" placeholder="Nhập nội dung...">
+                
                 <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Đối tượng:</label>
                 <input type="text" id="modal-dt" placeholder="Nhập đối tượng...">
+
                 <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Số tiền thực chi (VNĐ):</label>
-                <input type="number" id="modal-price" placeholder="Nhập số tiền chi...">
+                <input type="text" id="modal-price" placeholder="Nhập số tiền chi..." oninput="formatCurrencyInput(this)">
+                
                 <div class="modal-btns">
                     <button class="btn-cancel" onclick="closeModal()">Hủy</button>
                     <button class="btn-confirm" onclick="confirmCheck()">Hoàn Thành</button>
@@ -308,7 +312,7 @@
             <div class="modal-content" style="max-height: 90vh; overflow-y: auto;">
                 <h3>THÊM KHOẢN CHI</h3>
                 <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Ngày:</label>
-                <select id="add-day" style="width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #ddd; border-radius: 6px; font-size: 16px;"></select>
+                <select id="add-day" style="width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #ddd; border-radius: 6px; font-size: 16px; background-color: #f1f2f6;"></select>
                 
                 <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold;">Danh mục:</label>
                 <select id="add-cat" style="width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #ddd; border-radius: 6px; font-size: 16px;"></select>
@@ -320,7 +324,7 @@
                 <input type="text" id="add-dt" placeholder="Nhập đối tượng...">
 
                 <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Giá (VNĐ):</label>
-                <input type="number" id="add-price" placeholder="Ví dụ: 10000">
+                <input type="text" id="add-price" placeholder="Ví dụ: 10,000" oninput="formatCurrencyInput(this)">
                 
                 <label style="text-align: left; display: block; font-size: 14px; color: #34495e; font-weight: bold; margin-top: 10px;">Số lượng:</label>
                 <input type="number" id="add-sl" value="1" min="1">
@@ -514,18 +518,34 @@
             return dayNum === 0 ? 'chua-nhat' : `thu-${dayNum + 1}`;
         }
 
+        // --- BẮT ĐẦU CHỈNH SỬA LOGIC JAVASCRIPT ---
         let saveTimer; let currentAction = null;
         let editingConflict = null; 
+
+        // Hàm xử lý định dạng số có dấu phẩy khi người dùng gõ
+        function formatCurrencyInput(input) {
+            let val = input.value.replace(/\D/g, ''); // Bỏ mọi ký tự không phải số
+            if (val !== "") {
+                input.value = Number(val).toLocaleString('en-US'); // Thêm phẩy tự động (vd: 10,000)
+            } else {
+                input.value = "";
+            }
+        }
 
         // --- CÁC HÀM XỬ LÝ THÊM KHOẢN CHI (MỚI) ---
         function openAddModal() {
             let daySel = document.getElementById('add-day');
             let catSel = document.getElementById('add-cat');
-            if (daySel.options.length === 0) {
-                daysArr.forEach((d, i) => daySel.add(new Option(daysName[i], d)));
+            
+            // CHỈ HIỂN THỊ VÀ KHÓA VÀO NGÀY HIỆN TẠI
+            let currentDay = getCurrentDayKey();
+            let dayNameStr = daysName[daysArr.indexOf(currentDay)];
+            daySel.innerHTML = `<option value="${currentDay}">${dayNameStr} (Hôm nay)</option>`;
+            daySel.disabled = true; // Khóa dropdown, không cho đổi ngày khác
+
+            if (catSel.options.length === 0) {
                 catsArr.forEach((c, i) => catSel.add(new Option(catsName[i], c)));
             }
-            daySel.value = getCurrentDayKey();
             document.getElementById('add-nd').value = '';
             document.getElementById('add-dt').value = '';
             document.getElementById('add-price').value = '';
@@ -541,7 +561,10 @@
             let cat = document.getElementById('add-cat').value;
             let nd = document.getElementById('add-nd').value.trim();
             let dt = document.getElementById('add-dt').value.trim();
-            let price = Number(document.getElementById('add-price').value || 0);
+            
+            // Xóa dấu phẩy để biến thành số chuẩn trước khi tính toán/lưu trữ
+            let priceStr = document.getElementById('add-price').value.replace(/,/g, '');
+            let price = Number(priceStr || 0);
             let sl = parseInt(document.getElementById('add-sl').value || 1);
 
             if(!nd || price <= 0) return alert("Vui lòng nhập Nội dung và Giá hợp lệ!");
@@ -579,9 +602,12 @@
         function openConfirmModal(day, cat, index, nd, dt, price, sl, checkboxEl) {
             checkboxEl.checked = false; 
             let numericPrice = price ? price.toString().replace(/,/g, '') : '0';
+            
             document.getElementById('modal-nd').value = nd || '';
             document.getElementById('modal-dt').value = dt || '';
-            document.getElementById('modal-price').value = numericPrice;
+            // Gắn sẵn giá trị có dấu phẩy khi mở modal xác nhận
+            document.getElementById('modal-price').value = Number(numericPrice).toLocaleString('en-US');
+            
             currentAction = { day, cat, index, sl: parseInt(sl) || 1 };
             document.getElementById('confirm-modal').style.display = 'flex';
         }
@@ -591,7 +617,11 @@
         function confirmCheck() {
             if(!currentAction) return;
             let {day, cat, index, sl} = currentAction;
-            let actualPrice = document.getElementById('modal-price').value;
+            
+            // Tẩy dấu phẩy để lưu dạng số nguyên gốc vào DataBase
+            let actualPriceStr = document.getElementById('modal-price').value.replace(/,/g, '');
+            let actualPrice = Number(actualPriceStr || 0);
+            
             let customNd = document.getElementById('modal-nd').value.trim();
             let customDt = document.getElementById('modal-dt').value.trim();
 
@@ -610,15 +640,18 @@
             if (!currentData.orig) currentData.orig = { nd: plannedItem.nd || customNd, dt: plannedItem.dt || customDt };
 
             currentData.count += 1;
-            currentData.history.push(actualPrice);
+            // Lưu lại dưới dạng chuỗi số không phẩy
+            currentData.history.push(actualPrice.toString());
             currentData.customNd = customNd;
             currentData.customDt = customDt;
+
             if (currentData.count >= sl) currentData.done = true;
 
             trackingData[day][cat][index] = currentData;
             saveStatusToDB(day, cat, index, currentData);
             closeModal(); renderData();
         }
+// --- KẾT THÚC CHỈNH SỬA LOGIC JAVASCRIPT ---
 
         function resolveConflict(action, day, cat, index) {
             if (action === 'keep') {
