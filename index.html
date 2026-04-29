@@ -486,6 +486,7 @@
 
         // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT ---
         let saveTimer; let currentAction = null;
+        let editingConflict = null; // Biến lưu trạng thái đang chỉnh sửa xung đột
 
         function openConfirmModal(day, cat, index, nd, dt, price, sl, checkboxEl) {
             checkboxEl.checked = false; 
@@ -512,10 +513,17 @@
             if (!trackingData[day][cat]) trackingData[day][cat] = {};
 
             let currentData = trackingData[day][cat][index];
+            let plannedItem = weekData[day][cat][index] || {}; // Lấy dữ liệu kế hoạch gốc
+
             if (typeof currentData === 'boolean') {
                 currentData = { count: currentData ? sl : 0, done: currentData, history: [], customNd: '', customDt: '' };
             } else if (!currentData) {
                 currentData = { count: 0, done: false, history: [], customNd: '', customDt: '' };
+            }
+
+            // LƯU LẠI BẢN GỐC ĐỂ PHÁT HIỆN THAY ĐỔI SAU NÀY
+            if (!currentData.orig) {
+                currentData.orig = { nd: plannedItem.nd, dt: plannedItem.dt };
             }
 
             currentData.count += 1;
@@ -530,8 +538,46 @@
             closeModal(); renderData();
         }
 
+        // CHỨC NĂNG XỬ LÝ XUNG ĐỘT (KHI CÓ SỰ THAY ĐỔI)
+        function resolveConflict(action, day, cat, index) {
+            if (action === 'keep') {
+                let plannedItem = weekData[day][cat][index] || {};
+                if (trackingData[day] && trackingData[day][cat] && trackingData[day][cat][index]) {
+                    // Cập nhật lại bản gốc để khớp với DB mới, chấm dứt cảnh báo
+                    trackingData[day][cat][index].orig = { nd: plannedItem.nd, dt: plannedItem.dt };
+                    saveStatusToDB(day, cat, index, trackingData[day][cat][index]);
+                }
+                renderData();
+            } else if (action === 'delete') {
+                if(confirm("Xác nhận xóa khoản chi này khỏi lịch sử đã tick?")) {
+                    trackingData[day][cat][index] = null;
+                    saveStatusToDB(day, cat, index, null);
+                    renderData();
+                }
+            } else if (action === 'edit') {
+                editingConflict = { day, cat, index };
+                renderData();
+            } else if (action === 'saveEdit') {
+                let newNd = document.getElementById(`edit-nd-${day}${cat}${index}`).value.trim();
+                let newDt = document.getElementById(`edit-dt-${day}${cat}${index}`).value.trim();
+                let plannedItem = weekData[day][cat][index] || {};
+
+                let tData = trackingData[day][cat][index];
+                tData.customNd = newNd;
+                tData.customDt = newDt;
+                tData.orig = { nd: plannedItem.nd, dt: plannedItem.dt }; // Cập nhật lại gốc
+                saveStatusToDB(day, cat, index, tData);
+                
+                editingConflict = null;
+                renderData();
+            } else if (action === 'cancelEdit') {
+                editingConflict = null;
+                renderData();
+            }
+        }
+
         function undoCheck(day, cat, index) {
-            if (!confirm("Bạn có muốn hoàn tác khoản chi này?")) return;
+            if (!confirm("Bạn có muốn hoàn tác (bỏ tích) khoản chi này?")) return;
             
             if (trackingData[day] && trackingData[day][cat]) {
                 let currentData = trackingData[day][cat][index];
@@ -578,7 +624,6 @@
             return Number(num).toLocaleString('vi-VN') + ' đ';
         }
 
-        // --- BẮT ĐẦU CHỈNH SỬA MODULE JAVASCRIPT 2 ---
         function renderData() {
             const container = document.getElementById('data-container');
             container.innerHTML = "";
@@ -586,40 +631,34 @@
             let currentDayKey = getCurrentDayKey();
             let todayIndex = daysArr.indexOf(currentDayKey);
 
-            // GIAO DIỆN TỔNG KẾT (SITE MỚI)
+            // GIAO DIỆN TỔNG KẾT
             if (currentViewMode === 'summary') {
                 let expectedTotals = Array(catsArr.length).fill(0);
                 let actualTotals = Array(catsArr.length).fill(0);
-                let daysToCalc = daysArr.slice(0, todayIndex + 1); // Tính từ đầu tuần đến hôm nay
+                let daysToCalc = daysArr.slice(0, todayIndex + 1);
 
-                let totalExpected = 0;
-                let totalActual = 0;
+                let totalExpected = 0; let totalActual = 0;
 
-                // Tính toán dữ liệu
                 daysToCalc.forEach(dayKey => {
                     catsArr.forEach((catKey, cIdx) => {
                         let items = (weekData && weekData[dayKey] && weekData[dayKey][catKey]) ? weekData[dayKey][catKey] : [];
                         items.forEach((item, index) => {
                             let itemTotal = Number(item.total || 0);
-                            expectedTotals[cIdx] += itemTotal;
-                            totalExpected += itemTotal;
+                            expectedTotals[cIdx] += itemTotal; totalExpected += itemTotal;
 
                             let tData = trackingData[dayKey] && trackingData[dayKey][catKey] && trackingData[dayKey][catKey][index];
                             if (tData === true) {
-                                actualTotals[cIdx] += itemTotal;
-                                totalActual += itemTotal;
+                                actualTotals[cIdx] += itemTotal; totalActual += itemTotal;
                             } else if (tData && typeof tData === 'object') {
                                 if (tData.history && tData.history.length > 0) {
                                     let sumActual = tData.history.reduce((a, b) => a + Number(b || 0), 0);
-                                    actualTotals[cIdx] += sumActual;
-                                    totalActual += sumActual;
+                                    actualTotals[cIdx] += sumActual; totalActual += sumActual;
                                 }
                             }
                         });
                     });
                 });
 
-                // Tính chênh lệch và tiến độ
                 let difference = totalExpected - totalActual;
                 let diffColor = difference >= 0 ? '#27ae60' : '#e74c3c';
                 let diffText = difference >= 0 ? `+${formatVND(difference)} (Dư)` : `${formatVND(difference)} (Vượt)`;
@@ -628,7 +667,6 @@
                 let displayPercent = Math.min(progressPercent, 100);
                 let progressColor = progressPercent > 100 ? '#e74c3c' : (progressPercent > 80 ? '#f39c12' : '#27ae60');
 
-                // Vẽ phần Thống kê tổng quan & Thanh tiến độ
                 let summaryHtml = `
                     <div style="display: flex; justify-content: space-between; margin-bottom: 20px; font-weight: bold; font-size: 14px; gap: 10px; text-align: center;">
                         <div style="background: #ecf0f1; padding: 10px; border-radius: 8px; flex: 1; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
@@ -644,7 +682,6 @@
                             <div style="color: ${diffColor};">${diffText}</div>
                         </div>
                     </div>
-
                     <div style="margin-bottom: 30px;">
                         <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; margin-bottom: 8px;">
                             <span style="color: #34495e;">Tiến độ tiêu tiền</span>
@@ -653,50 +690,34 @@
                         <div style="width: 100%; background-color: #e9ecef; border-radius: 10px; height: 18px; overflow: hidden; position: relative;">
                             <div style="height: 100%; background-color: ${progressColor}; width: ${displayPercent}%; transition: width 0.5s ease-in-out;"></div>
                         </div>
-                    </div>
-                `;
+                    </div>`;
 
-                // Vẽ bảng Tổng kết
-                summaryHtml += `<div class="day-section" style="border: none;">
-                    <div style="overflow-x: auto;">
-                    <table style="width: 100%; text-align: center; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                        <thead>
-                            <tr>`;
+                summaryHtml += `<div class="day-section" style="border: none;"><div style="overflow-x: auto;">
+                    <table style="width: 100%; text-align: center; border-collapse: collapse; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"><thead><tr>`;
                 
-                catsArr.forEach((catKey, idx) => {
-                    summaryHtml += `<th style="padding: 12px 5px; border: 1px solid #000; background-color: #f1f2f6; font-weight: bold; min-width: 100px;">${catsName[idx]}</th>`;
-                });
-                summaryHtml += `</tr></thead><tbody>`;
-
-                // Hàng 1: Dự kiến
-                summaryHtml += `<tr>`;
+                catsArr.forEach((catKey, idx) => { summaryHtml += `<th style="padding: 12px 5px; border: 1px solid #000; background-color: #f1f2f6; font-weight: bold; min-width: 100px;">${catsName[idx]}</th>`; });
+                summaryHtml += `</tr></thead><tbody><tr>`;
+                
                 expectedTotals.forEach(val => {
                     summaryHtml += `<td style="padding: 15px 5px; border: 1px solid #000; color: #34495e;">
-                                        <div style="font-size:12px; color:#7f8c8d; margin-bottom:5px;">Dự kiến</div>
-                                        <strong>${formatVND(val)}</strong>
+                                        <div style="font-size:12px; color:#7f8c8d; margin-bottom:5px;">Dự kiến</div><strong>${formatVND(val)}</strong>
                                     </td>`;
                 });
-                summaryHtml += `</tr>`;
-
-                // Hàng 2: Thực chi
-                summaryHtml += `<tr>`;
+                summaryHtml += `</tr><tr>`;
+                
                 actualTotals.forEach(val => {
                     summaryHtml += `<td style="padding: 15px 5px; border: 1px solid #000; color: #27ae60;">
-                                        <div style="font-size:12px; color:#7f8c8d; margin-bottom:5px;">Thực chi</div>
-                                        <strong>${formatVND(val)}</strong>
+                                        <div style="font-size:12px; color:#7f8c8d; margin-bottom:5px;">Thực chi</div><strong>${formatVND(val)}</strong>
                                     </td>`;
                 });
-                summaryHtml += `</tr>`;
-
-                summaryHtml += `</tbody></table></div></div>`;
-                container.innerHTML = summaryHtml;
-                return; // Dừng hàm tại đây nếu đang ở Tab Tổng kết
+                summaryHtml += `</tr></tbody></table></div></div>`;
+                
+                container.innerHTML = summaryHtml; return; 
             }
 
-            // GIAO DIỆN CẦN CHI & LỊCH SỬ (Giữ nguyên logic cũ)
+            // GIAO DIỆN CẦN CHI & LỊCH SỬ
             let daysToRender = currentViewMode === 'pending' ? daysArr.slice(0, todayIndex + 1) : daysArr;
-            let hasAnyVisibleItems = false;
-            let finalHtml = "";
+            let hasAnyVisibleItems = false; let finalHtml = "";
 
             daysToRender.forEach(dayKey => {
                 let dayIndex = daysArr.indexOf(dayKey);
@@ -742,41 +763,88 @@
                             let cleanNd = item.nd ? item.nd.replace(/^Nộp quỹ:\s*/i, '') : '';
                             let itemDt = item.dt ? item.dt : '';
 
-                            if (tData && typeof tData === 'object') {
-                                if (tData.customNd) cleanNd = tData.customNd;
-                                if (tData.customDt) itemDt = tData.customDt;
-                            }
-
-                            let title = `${cleanNd} ${itemDt ? ' | ' + itemDt : ''}`;
-                            let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
-                            let safeNd = cleanNd.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                            let safeDt = itemDt.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-
-                            let checkHtml = ''; let finalPriceStr = ''; let displaySl = ''; let rowCssClass = '';
-
-                            if (currentViewMode === 'pending') {
-                                let remainingSl = totalSl - count;
-                                displaySl = `<span style="color:#e74c3c;">${remainingSl}</span>`;
-                                finalPriceStr = formatVND(item.total);
-                                checkHtml = `<input type="checkbox" class="done-check" onclick="openConfirmModal('${dayKey}', '${catKey}', ${index}, '${safeNd}', '${safeDt}', '${giaFormatted}', ${totalSl}, this)">`;
-                            } else {
-                                displaySl = totalSl; rowCssClass = 'item-done'; 
-                                checkHtml = `<input type="checkbox" class="done-check" checked onclick="undoCheck('${dayKey}', '${catKey}', ${index})">`;
-                                if (tData && tData.history && tData.history.length > 0) {
-                                    let sumActual = tData.history.reduce((a, b) => a + Number(b || 0), 0);
-                                    finalPriceStr = `<span style="color:#27ae60; font-weight:bold;">${formatVND(sumActual)}</span>`;
-                                } else {
-                                    finalPriceStr = `<span style="color:#27ae60; font-weight:bold;">${formatVND(item.total)}</span>`;
+                            // XÁC ĐỊNH XUNG ĐỘT (Khi dữ liệu gốc thay đổi so với lúc tick)
+                            let isConflict = false;
+                            if (tData && typeof tData === 'object' && tData.orig) {
+                                if (tData.orig.nd !== item.nd || tData.orig.dt !== item.dt) {
+                                    isConflict = true;
                                 }
                             }
 
-                            catHtml += `<tr id="row-${dayKey}-${catKey}-${index}" class="${rowCssClass}">
-                                            <td class="col-check">${checkHtml}</td>
-                                            <td>${title}</td>
-                                            <td class="col-gia">${formatVND(giaFormatted)}</td>
-                                            <td class="col-sl" style="font-weight:bold;">${displaySl}</td>
-                                            <td class="col-tong">${finalPriceStr}</td>
-                                        </tr>`;
+                            let giaFormatted = item.gia ? item.gia.replace(/,/g, '') : 0;
+
+                            if (isConflict) {
+                                let isEditing = editingConflict && editingConflict.day === dayKey && editingConflict.cat === catKey && editingConflict.index === index;
+                                let conflictContent = '';
+                                
+                                if (isEditing) {
+                                    let currentCustomNd = tData.customNd || tData.orig.nd || cleanNd;
+                                    let currentCustomDt = tData.customDt || tData.orig.dt || itemDt;
+                                    conflictContent = `
+                                        <div style="color:#c0392b; font-size:14px; font-weight:bold; margin-bottom:10px;">⚠️ Chỉnh sửa dữ liệu</div>
+                                        <input type="text" id="edit-nd-${dayKey}${catKey}${index}" value="${currentCustomNd}" style="width:100%; padding:8px; margin-bottom:8px; border:1px solid #ccc; border-radius:4px; box-sizing: border-box;" placeholder="Nội dung">
+                                        <input type="text" id="edit-dt-${dayKey}${catKey}${index}" value="${currentCustomDt}" style="width:100%; padding:8px; margin-bottom:8px; border:1px solid #ccc; border-radius:4px; box-sizing: border-box;" placeholder="Đối tượng">
+                                        <div style="display:flex; gap:10px;">
+                                            <button onclick="resolveConflict('saveEdit', '${dayKey}', '${catKey}', ${index})" style="background:#27ae60; color:#fff; border:none; padding:8px 15px; border-radius:4px; cursor:pointer; font-weight:bold;">Lưu thay đổi</button>
+                                            <button onclick="resolveConflict('cancelEdit')" style="background:#95a5a6; color:#fff; border:none; padding:8px 15px; border-radius:4px; cursor:pointer; font-weight:bold;">Hủy</button>
+                                        </div>
+                                    `;
+                                } else {
+                                    let oldText = `${tData.orig.nd ? tData.orig.nd.replace(/^Nộp quỹ:\s*/i, '') : ''} ${tData.orig.dt ? '| ' + tData.orig.dt : ''}`;
+                                    let newText = `${cleanNd} ${itemDt ? '| ' + itemDt : ''}`;
+                                    conflictContent = `
+                                        <div style="color:#c0392b; font-size:14px; font-weight:bold; margin-bottom:5px;">⚠️ Kế hoạch gốc đã bị thay đổi!</div>
+                                        <div style="font-size:13px; color:#7f8c8d; text-decoration: line-through; margin-bottom:3px;">Cũ: ${oldText}</div>
+                                        <div style="font-size:14px; color:#34495e; margin-bottom:10px;">Mới: <span style="font-weight:bold;">${newText}</span></div>
+                                        <div style="display:flex; gap:8px; flex-wrap: wrap;">
+                                            <button onclick="resolveConflict('keep', '${dayKey}', '${catKey}', ${index})" style="background:#2980b9; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Giữ nguyên</button>
+                                            <button onclick="resolveConflict('edit', '${dayKey}', '${catKey}', ${index})" style="background:#f39c12; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Sửa nội dung</button>
+                                            <button onclick="resolveConflict('delete', '${dayKey}', '${catKey}', ${index})" style="background:#e74c3c; color:#fff; border:none; padding:6px 12px; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold;">Xóa dữ liệu</button>
+                                        </div>
+                                    `;
+                                }
+                                
+                                catHtml += `<tr id="row-${dayKey}-${catKey}-${index}" style="background-color: #fadbd8;">
+                                                <td class="col-check" style="vertical-align: top; padding-top: 15px;"><span style="font-size:18px;">⚠️</span></td>
+                                                <td colspan="4">${conflictContent}</td>
+                                            </tr>`;
+                            } else {
+                                // HIỂN THỊ HÀNG BÌNH THƯỜNG KHÔNG XUNG ĐỘT
+                                if (tData && typeof tData === 'object') {
+                                    if (tData.customNd) cleanNd = tData.customNd;
+                                    if (tData.customDt) itemDt = tData.customDt;
+                                }
+
+                                let title = `${cleanNd} ${itemDt ? ' | ' + itemDt : ''}`;
+                                let safeNd = cleanNd.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                                let safeDt = itemDt.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+                                let checkHtml = ''; let finalPriceStr = ''; let displaySl = ''; let rowCssClass = '';
+
+                                if (currentViewMode === 'pending') {
+                                    let remainingSl = totalSl - count;
+                                    displaySl = `<span style="color:#e74c3c;">${remainingSl}</span>`;
+                                    finalPriceStr = formatVND(item.total);
+                                    checkHtml = `<input type="checkbox" class="done-check" onclick="openConfirmModal('${dayKey}', '${catKey}', ${index}, '${safeNd}', '${safeDt}', '${giaFormatted}', ${totalSl}, this)">`;
+                                } else {
+                                    displaySl = totalSl; rowCssClass = 'item-done'; 
+                                    checkHtml = `<input type="checkbox" class="done-check" checked onclick="undoCheck('${dayKey}', '${catKey}', ${index})">`;
+                                    if (tData && tData.history && tData.history.length > 0) {
+                                        let sumActual = tData.history.reduce((a, b) => a + Number(b || 0), 0);
+                                        finalPriceStr = `<span style="color:#27ae60; font-weight:bold;">${formatVND(sumActual)}</span>`;
+                                    } else {
+                                        finalPriceStr = `<span style="color:#27ae60; font-weight:bold;">${formatVND(item.total)}</span>`;
+                                    }
+                                }
+
+                                catHtml += `<tr id="row-${dayKey}-${catKey}-${index}" class="${rowCssClass}">
+                                                <td class="col-check">${checkHtml}</td>
+                                                <td>${title}</td>
+                                                <td class="col-gia">${formatVND(giaFormatted)}</td>
+                                                <td class="col-sl" style="font-weight:bold;">${displaySl}</td>
+                                                <td class="col-tong">${finalPriceStr}</td>
+                                            </tr>`;
+                            }
                         });
                         catHtml += `</tbody>`;
                         if(hasItemsInCat) dayHtml += catHtml;
@@ -797,7 +865,7 @@
                 container.innerHTML = finalHtml;
             }
         }
-// --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT 2 ---
+// --- KẾT THÚC CHỈNH SỬA MODULE JAVASCRIPT ---
     </script>
 </body>
 </html>
